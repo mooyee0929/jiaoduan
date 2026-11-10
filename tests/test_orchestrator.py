@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from agentlayer.errors import LayerError
-from agentlayer.orchestrator import run as orchestration
-from agentlayer.orchestrator.plan import parse_plan
-from agentlayer.orchestrator.run import (
+from jiaoduan.errors import LayerError
+from jiaoduan.orchestrator import run as orchestration
+from jiaoduan.orchestrator.plan import parse_plan
+from jiaoduan.orchestrator.run import (
     Finished,
     Orchestrator,
     Outcome,
@@ -66,11 +66,11 @@ def test_bad_plans_are_rejected(broken: str, words: str) -> None:
 
 def test_each_worker_gets_its_own_agent_name_and_only_layer_tools(tmp_path: Path) -> None:
     config = mcp_config("collect")
-    server = config["mcpServers"]["agent-layer"]  # type: ignore[index]
-    assert server["env"]["AGENTLAYER_AGENT"] == "collect"
+    server = config["mcpServers"]["jiaoduan"]  # type: ignore[index]
+    assert server["env"]["JIAODUAN_AGENT"] == "collect"
     spec = parse_plan(PLAN).agents[2]
     command = command_for(spec, tmp_path / "c.json", "do it")
-    assert command[command.index("--allowedTools") + 1] == "mcp__agent-layer"
+    assert command[command.index("--allowedTools") + 1] == "mcp__jiaoduan"
     assert "--strict-mcp-config" in command
     assert command[command.index("--tools") + 1] == ""
     assert command[command.index("--model") + 1] == "claude-sonnet-5-5"
@@ -95,7 +95,7 @@ class FakeRuns:
         self.peak = 0
 
     async def runner(self, command: Sequence[str], env: dict[str, str], timeout: float) -> Finished:
-        name = env["AGENTLAYER_AGENT"]
+        name = env["JIAODUAN_AGENT"]
         self.started.append(name)
         self.running += 1
         self.peak = max(self.peak, self.running)

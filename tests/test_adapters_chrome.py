@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from agentlayer.errors import LayerError
-from agentlayer.gate import Policy
 from bench.fixture_server import serve
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Policy
 from tests.web_harness import engine_with_chrome, run
 
 pytestmark = pytest.mark.chrome

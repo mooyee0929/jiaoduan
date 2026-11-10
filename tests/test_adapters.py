@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from agentlayer.adapters.registry import AdapterRegistry, applies
-from agentlayer.adapters.runner import list_tools, locate
-from agentlayer.adapters.schema import AdapterInvalid, parse, placeholders
-from agentlayer.adapters.tools import check_paths, draft_from_trace
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Gate, Policy
-from agentlayer.model import Locator, Node, Ref, Role, Surface, SurfaceId
-from agentlayer.trace import SCHEMA
+from jiaoduan.adapters.registry import AdapterRegistry, applies
+from jiaoduan.adapters.runner import list_tools, locate
+from jiaoduan.adapters.schema import AdapterInvalid, parse, placeholders
+from jiaoduan.adapters.tools import check_paths, draft_from_trace
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Gate, Policy
+from jiaoduan.model import Locator, Node, Ref, Role, Surface, SurfaceId
+from jiaoduan.trace import SCHEMA
 from tests.fakes import SURFACE, FakeBackend, button, form, text
 from tests.test_engine import run
 

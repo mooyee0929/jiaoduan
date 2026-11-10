@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from agentlayer.client import Client
-from agentlayer.mcp_server import build_server
+from jiaoduan.client import Client
+from jiaoduan.mcp_server import build_server
 
 
 def tools() -> dict[str, Any]:
@@ -24,7 +24,7 @@ def test_every_documented_tool_is_offered_and_nothing_approves_gates() -> None:
 
 
 def test_act_offers_every_engine_action() -> None:
-    from agentlayer.model import ActionKind
+    from jiaoduan.model import ActionKind
 
     schema = tools()["act"].input_schema["properties"]["action"]
     offered = set(schema.get("enum") or [option["const"] for option in schema["anyOf"]])

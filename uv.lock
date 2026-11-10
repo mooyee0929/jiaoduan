@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agent-layer"
+name = "jiaoduan"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

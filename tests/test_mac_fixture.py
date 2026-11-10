@@ -17,10 +17,10 @@ from typing import Any
 
 import pytest
 
-from agentlayer.adapters.registry import AdapterRegistry
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Gate, Policy
+from jiaoduan.adapters.registry import AdapterRegistry
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Gate, Policy
 
 pytestmark = pytest.mark.mac
 _START_WAIT = 10.0
@@ -75,7 +75,7 @@ def run(work: Any) -> Any:
 
 
 def engine(policy: Policy = Policy.ASK) -> Engine:
-    from agentlayer.backends.mac.backend import MacBackend
+    from jiaoduan.backends.mac.backend import MacBackend
 
     return Engine({"mac": MacBackend()}, gate=Gate(policy), adapters=AdapterRegistry(()))
 

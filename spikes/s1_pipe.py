@@ -7,8 +7,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from agentlayer.backends.web.cdp import Connection
-from agentlayer.backends.web.launch import launch_chrome
+from jiaoduan.backends.web.cdp import Connection
+from jiaoduan.backends.web.launch import launch_chrome
 
 HTML = "data:text/html,<title>t</title><main><h1>Hi</h1><button>Go</button></main>"
 

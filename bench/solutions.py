@@ -11,8 +11,8 @@ import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
 
 Solution = Callable[[Engine, str, str, Path], Awaitable[str]]
 AGENT = "bench"

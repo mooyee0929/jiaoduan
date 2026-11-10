@@ -7,12 +7,12 @@ from typing import TypeVar
 
 import pytest
 
-from agentlayer.claims import Claims, SessionLocks
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Gate, Policy
-from agentlayer.model import Action, ActionKind, CommitFacts, Handle, KeyContext, RawNode
-from agentlayer.trace import Trace
+from jiaoduan.claims import Claims, SessionLocks
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Gate, Policy
+from jiaoduan.model import Action, ActionKind, CommitFacts, Handle, KeyContext, RawNode
+from jiaoduan.trace import Trace
 from tests.fakes import SURFACE, FakeBackend, button, form, textbox
 
 T = TypeVar("T")
@@ -100,7 +100,7 @@ def test_commit_buttons_stop_at_the_gate_until_a_person_approves() -> None:
 
 
 def test_toggle_already_in_state_sends_nothing() -> None:
-    from agentlayer.model import Role, State
+    from jiaoduan.model import Role, State
 
     box = RawNode(1, Role.CHECKBOX, "checkbox", "Agree", actionable=True,
                   states=frozenset({State.CHECKED}))
@@ -115,7 +115,7 @@ def test_toggle_already_in_state_sends_nothing() -> None:
 
 
 def test_toggle_presses_when_the_state_differs() -> None:
-    from agentlayer.model import Role
+    from jiaoduan.model import Role
 
     box = RawNode(1, Role.CHECKBOX, "checkbox", "Agree", actionable=True)
     engine, backend = make([box])

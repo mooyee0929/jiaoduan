@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from agentlayer.adapters.registry import AdapterRegistry
-from agentlayer.cli import confirm_at_terminal
-from agentlayer.client import Client
-from agentlayer.daemon import Daemon
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Gate
-from agentlayer.model import Surface, SurfaceId
+from jiaoduan.adapters.registry import AdapterRegistry
+from jiaoduan.cli import confirm_at_terminal
+from jiaoduan.client import Client
+from jiaoduan.daemon import Daemon
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Gate
+from jiaoduan.model import Surface, SurfaceId
 from tests.fakes import FakeBackend, button, form, textbox
 
 
@@ -49,7 +49,7 @@ class Windows(FakeBackend):
 async def daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Windows]:
     home = Path("/tmp") / f"al-{os.getpid()}-{tmp_path.name[-6:]}"
     home.mkdir(mode=0o700, exist_ok=True)
-    monkeypatch.setenv("AGENTLAYER_HOME", str(home))
+    monkeypatch.setenv("JIAODUAN_HOME", str(home))
     backend = Windows()
     engine = Engine({"fake": backend}, gate=Gate(), adapters=AdapterRegistry(()))
     server = Daemon(engine, idle_seconds=60)

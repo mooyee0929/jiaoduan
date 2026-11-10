@@ -1,4 +1,4 @@
-# agent-layer
+# jiaoduan
 
 A screenshot-free interface for AI agents to other people's web pages and macOS apps, where
 every action reports what actually happened and how strong the evidence is.
@@ -6,7 +6,7 @@ every action reports what actually happened and how strong the evidence is.
 GUIs are drawn for eyes. An agent driving one by screenshot pays a thousand-plus tokens per
 look, a round trip per step, coordinates that drift, and one more screenshot to learn whether
 the click worked. What an agent needs is smaller: the current state, what it can do, a way to
-do it, and whether it took effect. agent-layer sits between the agent and the UI and gives it
+do it, and whether it took effect. jiaoduan sits between the agent and the UI and gives it
 exactly that, as text, for any page or app that exposes accessibility information.
 
 ```
@@ -16,11 +16,16 @@ press button "Add another" [e12]: delivered | evidence tree | settled 180ms | ne
 rebound (re-rendered, same element): e12
 ```
 
-> Status: v0.1 in development. The name is provisional.
+> Status: v0.1 in development.
+
+The name is the jiaoduan (角端), a beast of Chinese legend said to understand the languages of
+every people and to know what is happening far away, and to bring word of it truthfully. This
+project speaks to web pages and native apps in one vocabulary, and tells the agent what its
+actions really did.
 
 ## What is different
 
-| | Typical tools | agent-layer |
+| | Typical tools | jiaoduan |
 | --- | --- | --- |
 | Did it work? | "page changed" | `expect` postconditions and an evidence level: none, tree, driver (the widget's own state), network (the app's request returned 2xx) |
 | After an action | read the whole page again | a scoped diff, built on refs that survive re-renders |
@@ -38,7 +43,7 @@ rebound (re-rendered, same element): e12
   buttons (by name in several languages, `type=submit`, a window's default button), Return
   that would submit, and form submissions nobody approved. A custom button that posts on
   click under an innocent name can still get through.
-- **Approval happens outside the model's tools**: `agentlayer gate approve` asks for a `y`
+- **Approval happens outside the model's tools**: `jiaoduan gate approve` asks for a `y`
   on the controlling terminal, which an agent's shell tool does not have. Any process running
   as you can still reach the daemon's socket, so give agents the layer's MCP tools, not a
   shell, when that matters (the orchestrator does this).
@@ -53,7 +58,7 @@ rebound (re-rendered, same element): e12
 
 ```bash
 uv sync --extra mac          # drop --extra mac on Linux
-claude mcp add agent-layer -- uv --directory "$PWD" run agentlayer-mcp
+claude mcp add jiaoduan -- uv --directory "$PWD" run jiaoduan-mcp
 ```
 
 The MCP server starts a background daemon on first use. The daemon owns one Chrome (headless
@@ -61,18 +66,18 @@ by default) on a dedicated profile; Chrome refuses remote control of your everyd
 To use a site that needs a login, sign in once in that profile:
 
 ```bash
-uv run agentlayer login https://example.com
+uv run jiaoduan login https://example.com
 ```
 
 When an agent hits a commit, it reports a gate id and stops. Review and approve it in your own
 terminal:
 
 ```bash
-uv run agentlayer gate list
-uv run agentlayer gate approve g3
+uv run jiaoduan gate list
+uv run jiaoduan gate approve g3
 ```
 
-Policy is set with `AGENTLAYER_COMMIT=ask` (default), `deny`, or `allow` (fixtures only).
+Policy is set with `JIAODUAN_COMMIT=ask` (default), `deny`, or `allow` (fixtures only).
 
 ## Tools
 
@@ -145,10 +150,10 @@ commit = true
 wait = { text_visible = "Thanks" }
 ```
 
-Put adapters in `~/Library/Application Support/agent-layer/adapters/` or a directory named by
-`AGENTLAYER_ADAPTERS`. When a page changes, a step fails with `ADAPTER_DRIFT` and the current
-view, so the agent can finish by hand. `agentlayer adapter check FILE` validates one, and
-`agentlayer adapter draft TRACE` turns an action trace (`AGENTLAYER_TRACE=path`) into a first
+Put adapters in `~/Library/Application Support/jiaoduan/adapters/` or a directory named by
+`JIAODUAN_ADAPTERS`. When a page changes, a step fails with `ADAPTER_DRIFT` and the current
+view, so the agent can finish by hand. `jiaoduan adapter check FILE` validates one, and
+`jiaoduan adapter draft TRACE` turns an action trace (`JIAODUAN_TRACE=path`) into a first
 draft; typed values were never recorded, so they become inputs.
 
 ## Several agents
@@ -168,21 +173,21 @@ task = "Summarise the refunds"
 after = ["collect"]
 ```
 
-`agentlayer run plan.toml` runs one `claude -p` per agent in dependency waves. Workers get
+`jiaoduan run plan.toml` runs one `claude -p` per agent in dependency waves. Workers get
 only this layer's tools and never talk to each other. Each one finishes with `report`, and
 later agents receive earlier reports. They share one browser through the daemon, which
 enforces the rules:
 
 - each tab or app belongs to one agent at a time, released when its connection drops;
 - adapters limit how many agents work on one site at once;
-- every pending commit shows up in the same `agentlayer gate list`.
+- every pending commit shows up in the same `jiaoduan gate list`.
 
 ## How it works
 
 ```
 claude / claude -p ── stdio MCP shim ─┐
-claude / claude -p ── stdio MCP shim ─┼─ Unix socket ── agentlayerd (engine)
-agentlayer CLI ───────────────────────┘                   ├─ web: CDP over a pipe ── Chrome
+claude / claude -p ── stdio MCP shim ─┼─ Unix socket ── jiaoduand (engine)
+jiaoduan CLI ───────────────────────┘                   ├─ web: CDP over a pipe ── Chrome
                                                           └─ mac: Accessibility API ── apps
 ```
 
@@ -371,7 +376,7 @@ layer, not an agent. Three rounds of each:
 
 Every agent got its own window or app. The checker found every page and app in the right
 state, and the person's frontmost app and pointer stayed put. Parallel model runs through
-`agentlayer run` have been checked end to end with two agents, not measured at scale.
+`jiaoduan run` have been checked end to end with two agents, not measured at scale.
 
 ## Development
 

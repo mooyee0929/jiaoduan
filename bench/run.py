@@ -26,15 +26,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from agentlayer.adapters.registry import AdapterRegistry
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Gate, Policy
 from bench.check import Task, Verdict, check, load_tasks
 from bench.fixture_server import serve
 from bench.fixtures.mac.launch import fixture_app
 from bench.solutions import AGENT as SOLUTION_AGENT
 from bench.solutions import SOLUTIONS
+from jiaoduan.adapters.registry import AdapterRegistry
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Gate, Policy
 
 ARMS = Path(__file__).parent / "arms.toml"
 RESULTS = Path(__file__).parent / "results"
@@ -95,10 +95,10 @@ def load_arms(path: Path = ARMS) -> dict[str, Arm]:
 
 def mcp_config(arm: Arm, home: Path, commit: str = "ask") -> dict[str, Any]:
     env = {
-        "AGENTLAYER_HOME": str(home), "AGENTLAYER_PROFILE": str(home / "profile"),
-        "AGENTLAYER_COMMIT": commit, "AGENTLAYER_MOCK_KEYCHAIN": "1",
-        "AGENTLAYER_AGENT": "bench",
-    } if arm.server == "agent-layer" else {}
+        "JIAODUAN_HOME": str(home), "JIAODUAN_PROFILE": str(home / "profile"),
+        "JIAODUAN_COMMIT": commit, "JIAODUAN_MOCK_KEYCHAIN": "1",
+        "JIAODUAN_AGENT": "bench",
+    } if arm.server == "jiaoduan" else {}
     return {"mcpServers": {arm.server: {
         "type": "stdio", "command": arm.command[0], "args": list(arm.command[1:]), "env": env,
     }}}
@@ -182,8 +182,8 @@ def prompt_for(task: Task, fixture: Fixture) -> str:
 
 
 def _stop_daemon(home: Path) -> None:
-    env = {**os.environ, "AGENTLAYER_HOME": str(home)}
-    subprocess.run([sys.executable, "-m", "agentlayer.cli", "daemon", "stop"], env=env,
+    env = {**os.environ, "JIAODUAN_HOME": str(home)}
+    subprocess.run([sys.executable, "-m", "jiaoduan.cli", "daemon", "stop"], env=env,
                    capture_output=True, check=False, timeout=30)
 
 
@@ -203,7 +203,7 @@ def run_once(task: Task, arm: Arm, model: str) -> dict[str, Any]:
         except subprocess.TimeoutExpired:
             usage = Usage(0, 0, 0, None, None, RUN_TIMEOUT, "", "timed out")
         finally:
-            if arm.server == "agent-layer":
+            if arm.server == "jiaoduan":
                 _stop_daemon(home)
         if _LIMIT.search(usage.answer):
             usage = Usage(**{**asdict(usage), "error": USAGE_LIMIT})
@@ -222,7 +222,7 @@ async def _engine_for(task: Task) -> AsyncIterator[Engine]:
     """An in-process engine with the task's commit policy, as the arms run it."""
     policy = Policy(task.commit)
     if task.platform == "mac":
-        from agentlayer.backends.mac.backend import MacBackend
+        from jiaoduan.backends.mac.backend import MacBackend
 
         engine = Engine({"mac": MacBackend()}, gate=Gate(policy), adapters=AdapterRegistry(()))
         try:

@@ -11,10 +11,10 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
-from agentlayer.adapters.registry import AdapterRegistry
-from agentlayer.backends.web.backend import WebBackend, WebOptions
-from agentlayer.engine import Engine
-from agentlayer.gate import Gate, Policy
+from jiaoduan.adapters.registry import AdapterRegistry
+from jiaoduan.backends.web.backend import WebBackend, WebOptions
+from jiaoduan.engine import Engine
+from jiaoduan.gate import Gate, Policy
 
 PAGES = Path(__file__).parent / "pages"
 T = TypeVar("T")

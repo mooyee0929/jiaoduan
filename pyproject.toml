@@ -1,5 +1,5 @@
 [project]
-name = "agent-layer"
+name = "jiaoduan"
 version = "0.0.1"
 description = "A verified, screenshot-free interface for AI agents to third-party web pages and macOS apps."
 readme = "README.md"
@@ -21,16 +21,16 @@ dev = [
 ]
 
 [project.scripts]
-agentlayer = "agentlayer.cli:main"
-agentlayer-mcp = "agentlayer.mcp_server:main"
-agentlayerd = "agentlayer.daemon:main"
+jiaoduan = "jiaoduan.cli:main"
+jiaoduan-mcp = "jiaoduan.mcp_server:main"
+jiaoduand = "jiaoduan.daemon:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agentlayer"]
+packages = ["src/jiaoduan"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

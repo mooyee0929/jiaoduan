@@ -6,9 +6,9 @@ import re
 
 import pytest
 
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Policy
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Policy
 from tests.web_harness import engine_with_chrome, pages_server, run
 
 pytestmark = pytest.mark.chrome
@@ -173,7 +173,7 @@ def test_guard_stops_a_submit_nobody_asked_for() -> None:
 
 
 def engine_surface(text: str):  # type: ignore[no-untyped-def]
-    from agentlayer.model import SurfaceId
+    from jiaoduan.model import SurfaceId
 
     return SurfaceId(text.split()[0])
 

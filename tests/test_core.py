@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from agentlayer import prune
-from agentlayer.diff import diff
-from agentlayer.errors import LayerError
-from agentlayer.expect import Scene, check
-from agentlayer.gate import Gate, Policy, commit_reason
-from agentlayer.model import (
+from jiaoduan import prune
+from jiaoduan.diff import diff
+from jiaoduan.errors import LayerError
+from jiaoduan.expect import Scene, check
+from jiaoduan.gate import Gate, Policy, commit_reason
+from jiaoduan.model import (
     CommitFacts,
     Evidence,
     Node,
@@ -19,8 +19,8 @@ from agentlayer.model import (
     State,
     SurfaceId,
 )
-from agentlayer.refs import RefTable, normalize_ref
-from agentlayer.render import quote
+from jiaoduan.refs import RefTable, normalize_ref
+from jiaoduan.render import quote
 from tests.fakes import button, form, text, textbox
 
 S = SurfaceId("fake:1")
@@ -231,7 +231,7 @@ def test_request_expect_fails_on_a_server_error() -> None:
 
 
 def test_a_failed_request_is_named_even_when_nothing_expected_it() -> None:
-    from agentlayer.engine import _failed_requests
+    from jiaoduan.engine import _failed_requests
 
     settle = Settle(True, 5, requests=(
         RequestRecord("GET", "/api/cities", 200), RequestRecord("POST", "/api/save", 500),

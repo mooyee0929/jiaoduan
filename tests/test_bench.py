@@ -92,16 +92,16 @@ def test_commands_disable_built_in_tools_and_other_servers(tmp_path: Path) -> No
     assert "--strict-mcp-config" in command
     allowed = command[command.index("--allowedTools") + 1:command.index("--disallowedTools")]
     hidden = command[command.index("--disallowedTools") + 1:command.index("--setting-sources")]
-    assert "mcp__agent-layer__observe" in allowed
-    assert "mcp__agent-layer__fill" in hidden and "mcp__agent-layer__fill" not in allowed
+    assert "mcp__jiaoduan__observe" in allowed
+    assert "mcp__jiaoduan__fill" in hidden and "mcp__jiaoduan__fill" not in allowed
     vision = load_arms()["A"]
     assert "browser_snapshot" in vision.hidden and "browser_evaluate" in vision.hidden
     assert "--snapshot-mode=none" in vision.command
-    env = mcp_config(arm, tmp_path)["mcpServers"]["agent-layer"]["env"]
-    assert env["AGENTLAYER_COMMIT"] == "ask"
+    env = mcp_config(arm, tmp_path)["mcpServers"]["jiaoduan"]["env"]
+    assert env["JIAODUAN_COMMIT"] == "ask"
     committing = {t.id for t in load_tasks() if t.commit == "allow"}
     assert committing == {"contact-send", "checkout-wizard", "mac-save"}
-    assert env["AGENTLAYER_PROFILE"].startswith(str(tmp_path))
+    assert env["JIAODUAN_PROFILE"].startswith(str(tmp_path))
 
 
 def test_a_submission_is_checked_field_by_field() -> None:

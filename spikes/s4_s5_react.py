@@ -14,8 +14,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from agentlayer.backends.web.cdp import Connection, Session
-from agentlayer.backends.web.launch import launch_chrome
+from jiaoduan.backends.web.cdp import Connection, Session
+from jiaoduan.backends.web.launch import launch_chrome
 
 APP = """<!doctype html><title>r</title><div id=root></div>
 <script type=module>

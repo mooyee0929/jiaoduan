@@ -14,8 +14,8 @@ from pathlib import Path
 
 import Quartz
 
-from agentlayer.backends.web.cdp import Connection, Session
-from agentlayer.backends.web.launch import launch_chrome
+from jiaoduan.backends.web.cdp import Connection, Session
+from jiaoduan.backends.web.launch import launch_chrome
 
 PAGE = """data:text/html,<title>%s</title><input id=i autofocus>
 <button id=b onclick="document.title='clicked'">Go</button>

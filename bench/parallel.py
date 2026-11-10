@@ -26,15 +26,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agentlayer.adapters.registry import AdapterRegistry
-from agentlayer.backends.web.backend import WebBackend, WebOptions
-from agentlayer.engine import Engine
-from agentlayer.errors import LayerError
-from agentlayer.gate import Gate, Policy
 from bench.check import Task, check, load_tasks
 from bench.fixture_server import serve
 from bench.fixtures.mac.launch import fixture_app
 from bench.solutions import SOLUTIONS
+from jiaoduan.adapters.registry import AdapterRegistry
+from jiaoduan.backends.web.backend import WebBackend, WebOptions
+from jiaoduan.engine import Engine
+from jiaoduan.errors import LayerError
+from jiaoduan.gate import Gate, Policy
 
 TASKS = ("contact-send", "application-fill", "checkout-wizard", "mac-fill")
 RESUME = b"%PDF-1.4\n% benchmark resume\n"
@@ -129,7 +129,7 @@ async def _round(mode: str, tasks: Sequence[Task]) -> Round:
         with stage(tasks, home) as where:
             web = WebBackend(WebOptions(home / "profile", headless=True, mock_keychain=True))
             await web.start()
-            from agentlayer.backends.mac.backend import MacBackend
+            from jiaoduan.backends.mac.backend import MacBackend
 
             engine = Engine(
                 {"web": web, "mac": MacBackend()}, gate=Gate(Policy.ALLOW),

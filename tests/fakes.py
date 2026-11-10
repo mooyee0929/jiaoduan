@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from agentlayer.model import (
+from jiaoduan.model import (
     Action,
     CommitFacts,
     Delivery,

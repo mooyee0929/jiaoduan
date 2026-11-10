@@ -29,7 +29,7 @@ tools = [
   "browser_video_hide_actions", "browser_video_show_actions", "browser_wait_for",
 ]
 
-[server.agent-layer]
+[server.jiaoduan]
 tools = ["surfaces", "open", "observe", "act", "key", "read", "wait", "form", "fill", "tools",
          "call", "report"]
 
@@ -56,14 +56,14 @@ tools = ["browser_navigate", "browser_snapshot", "browser_click", "browser_type"
 platforms = ["web"]
 
 [arm.C]
-label = "agent-layer elements (observe and act)"
-server = "agent-layer"
-command = ["{python}", "-m", "agentlayer.mcp_server"]
+label = "jiaoduan elements (observe and act)"
+server = "jiaoduan"
+command = ["{python}", "-m", "jiaoduan.mcp_server"]
 tools = ["surfaces", "open", "observe", "act", "key", "read", "wait"]
 
 [arm.D]
-label = "agent-layer forms (form and fill)"
-server = "agent-layer"
-command = ["{python}", "-m", "agentlayer.mcp_server"]
+label = "jiaoduan forms (form and fill)"
+server = "jiaoduan"
+command = ["{python}", "-m", "jiaoduan.mcp_server"]
 tools = ["surfaces", "open", "observe", "act", "key", "read", "wait", "form", "fill"]
 only_kinds = ["form"]

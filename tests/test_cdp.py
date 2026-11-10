@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from agentlayer.backends.web.cdp import CdpDisconnected, CdpError, CdpTimeout, Connection
-from agentlayer.backends.web.transport import TransportClosed
+from jiaoduan.backends.web.cdp import CdpDisconnected, CdpError, CdpTimeout, Connection
+from jiaoduan.backends.web.transport import TransportClosed
 
 
 class ScriptedTransport:
