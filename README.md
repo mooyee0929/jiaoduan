@@ -225,19 +225,40 @@ Fixtures are written from scratch and imitate no real site. They reproduce what 
 fail:
 
 - inputs that ignore untrusted events;
-- comboboxes whose options load late;
+- comboboxes whose options load late, and remote suggestions where only a picked one counts;
 - virtual lists, and uploads that re-render the form;
 - doubling autofill, yes/no buttons whose state lives in a class name;
-- Return that submits.
+- Return that submits;
+- fields that appear only after an answer, a shadow-root component, and a cross-origin iframe;
+- a "Saved" toast shown before the request behind it fails.
 
-Success is decided from what the page posted to the fixture server, which the agent cannot
-read.
+Success is decided from what the page posted to the fixture server, or from the state file
+the macOS fixture app writes. The agent can read neither.
+
+| Task | Platform | Kind | What it tests |
+| --- | --- | --- | --- |
+| `contact-send` | web | form, submits | a custom dropdown, then one submission |
+| `application-fill` | web | form | 11 fields with every trap above, no submission |
+| `application-visa` | web | form | the same form plus a field that appears after an answer |
+| `checkout-wizard` | web | form, submits | three steps, remote city suggestions, shadow DOM, a cross-origin frame |
+| `settings-save` | web | form | the first save fails behind a success toast |
+| `orders-lookup` | web | read | one cell in a 120-row table |
+| `orders-count` | web | read | counting rows with one status |
+| `doc-lookup` | web | read | one figure in a 40-section agreement with several decoys |
+| `mac-fill` | macOS | form | text, checkbox, pop-up and radio in a Cocoa app, no save |
+| `mac-save` | macOS | form, submits | the same app, with its default button behind the gate |
+
+Arms A and B are Playwright and run only the web tasks.
 
 ```bash
 uv run python -m bench.run --smoke                 # no model: every task is passable, sizes
 uv run python -m bench.run --repeat 5              # all arms; uses model quota
 uv run python -m bench.report bench/results/*.jsonl
+uv run python -m bench.parallel                    # several agents at once, no model
 ```
+
+`--smoke` runs a scripted solution for each task (`bench/solutions.py`) under the task's own
+commit policy, to prove the task can be passed and the checker accepts a correct run.
 
 Reports give success rates with Wilson intervals, and token counts with bootstrap intervals.
 
@@ -248,6 +269,8 @@ Setup:
 - Model: `claude-sonnet-5-5`, Playwright MCP 0.0.83, Chrome 157, 3 runs per cell.
 - Input tokens include cached tokens, so the `$` column, which prices them, is the fairer cost.
 - Raw records are in [`bench/published/2026-11-09.jsonl`](bench/published/2026-11-09.jsonl).
+- This run covers the first three tasks. The other seven have passed the scripted smoke
+  run but have not been run with a model yet.
 
 | task | arm | success (95% CI) | input tokens | vs B | tool calls | s | $ |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -286,7 +309,24 @@ What this does and does not show:
   above are after those fixes. A and B are from the first run, whose harness and tasks were
   otherwise identical.
 - **The gate policy differs by arm.** This layer's arms run with its shipped default, `ask`;
-  Playwright has no gate. Only the contact task, whose job is to submit, runs with `allow`.
+  Playwright has no gate. Only tasks whose job is to submit (`contact-send`,
+  `checkout-wizard`, `mac-save`) run with `allow`.
+
+### Several agents at once (2026-11-09)
+
+`bench.parallel` runs four tasks on one engine, first one after another, then all at once.
+The tasks are `contact-send`, `application-fill`, `checkout-wizard` and `mac-fill`. No model
+is involved: each agent runs the task's scripted solution, so this measures the coordination
+layer, not an agent. Three rounds of each:
+
+| mode | wall s (median) | tasks passed | refused claims | frontmost app or pointer moved |
+| --- | --- | --- | --- | --- |
+| serial | 17.8 | 12/12 | 0 | 0/3 |
+| parallel | 7.4 | 12/12 | 0 | 0/3 |
+
+Every agent got its own window or app. The checker found every page and app in the right
+state, and the person's frontmost app and pointer stayed put. Parallel model runs through
+`agentlayer run` have been checked end to end with two agents, not measured at scale.
 
 ## Development
 
