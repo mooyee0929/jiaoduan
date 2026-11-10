@@ -163,7 +163,7 @@ class Engine:
         return "\n".join(lines) or "no surfaces open"
 
     async def open(self, agent: str, target: str, kind: str | None = None) -> str:
-        backend = await self._ensure_started(kind or ("web" if _URL_LIKE.match(target) else "mac"))
+        backend = await self._ensure_started(kind or _backend_kind(target))
         surface = await backend.open(target)
         self.claims.acquire(agent, surface.id)
         self.state(agent).current = surface.id
@@ -607,6 +607,13 @@ class Engine:
 
     def gate_reject(self, gate_id: str) -> str:
         return f"rejected {self.gate.reject(gate_id).id}"
+
+
+def _backend_kind(target: str) -> str:
+    """URLs and bare domains open in the browser; app names and ``pid:N`` are native apps."""
+    if target.startswith("pid:"):
+        return "mac"
+    return "web" if _URL_LIKE.match(target) else "mac"
 
 
 def jsonable_expect(value: Any) -> Sequence[Mapping[str, object]] | Mapping[str, object] | None:

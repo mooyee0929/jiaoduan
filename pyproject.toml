@@ -55,8 +55,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 files = ["src"]
-exclude = ["src/agentlayer/backends/mac/"]
 
 [[tool.mypy.overrides]]
-module = ["objc", "AppKit", "Foundation", "ApplicationServices", "HIServices", "Quartz", "CoreFoundation"]
+module = [
+    "objc", "AppKit", "Foundation", "ApplicationServices", "HIServices", "Quartz",
+    "CoreFoundation",
+]
 ignore_missing_imports = true
