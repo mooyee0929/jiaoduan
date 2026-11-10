@@ -62,9 +62,22 @@ def test_the_first_save_of_a_page_fails_and_is_not_recorded() -> None:
     recorder = Recorder()
     body = {"page": "settings", "store": {"digest": "Weekly"}}
     assert recorder.record("/api/save", body) == 500
-    assert recorder.snapshot()["submissions"] == {}
+    assert recorder.snapshot()["saved"] == {} and recorder.saved_for("settings") == {}
     assert recorder.record("/api/save", body) == 200
-    assert recorder.snapshot()["submissions"] == {"settings": [{"digest": "Weekly"}]}
+    assert recorder.saved_for("settings") == {"digest": "Weekly"}
+    assert recorder.saved_for("application") == {}
+
+
+def test_settings_pass_on_what_the_server_kept_however_often_it_was_saved() -> None:
+    wanted = dict(task("settings-save").expect["saved"]["settings"])
+    assert check(task("settings-save"), {"saved": {"settings": wanted}}, "done").ok
+    verdict = check(task("settings-save"), {}, "done")
+    assert not verdict.ok and "saved.settings.digest" in " ".join(verdict.reasons)
+
+
+def test_checkout_values_are_quoted_so_trailing_punctuation_is_not_part_of_them() -> None:
+    prompt = task("checkout-wizard").prompt
+    assert '"Leave at the front desk"' in prompt and "front desk." not in prompt
 
 
 def test_no_arm_may_run_page_javascript() -> None:

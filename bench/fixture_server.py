@@ -37,6 +37,7 @@ class Recorder:
 
     state: dict[str, dict[str, Any]] = field(default_factory=dict)
     submissions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    saved: dict[str, dict[str, Any]] = field(default_factory=dict)
     failed_once: set[str] = field(default_factory=set)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -54,13 +55,19 @@ class Recorder:
                 if page not in self.failed_once:
                     self.failed_once.add(page)
                     return 500
-                self.submissions.setdefault(page, []).append(dict(body.get("store", {})))
+                self.saved[page] = dict(body.get("store", {}))
         return 200
+
+    def saved_for(self, page: str) -> dict[str, Any]:
+        """What the server holds for a page that loads its settings back, as real ones do."""
+        with self.lock:
+            return dict(self.saved.get(page, {}))
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             return {"state": json.loads(json.dumps(self.state)),
-                    "submissions": json.loads(json.dumps(self.submissions))}
+                    "submissions": json.loads(json.dumps(self.submissions)),
+                    "saved": json.loads(json.dumps(self.saved))}
 
 
 def _handler(recorder: Recorder, root: Path) -> type[http.server.SimpleHTTPRequestHandler]:
@@ -71,18 +78,25 @@ def _handler(recorder: Recorder, root: Path) -> type[http.server.SimpleHTTPReque
         def log_message(self, format: str, *args: Any) -> None:
             return None
 
+        def _json(self, value: Any) -> None:
+            payload = json.dumps(value).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(payload)
+
         def do_GET(self) -> None:  # noqa: N802
             parts = urlsplit(self.path)
+            query = parse_qs(parts.query)
             if parts.path == "/api/cities":
                 time.sleep(SUGGEST_DELAY)
-                query = parse_qs(parts.query).get("q", [""])[0]
-                payload = json.dumps(suggest(query)).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(payload)
+                self._json(suggest(query.get("q", [""])[0]))
+                return
+            if parts.path == "/api/settings":
+                # Only what a page saved itself; expected answers are never served.
+                self._json(recorder.saved_for(query.get("page", [""])[0]))
                 return
             if parts.path.startswith("/api/"):
                 self.send_error(404)  # recorded state is never served back

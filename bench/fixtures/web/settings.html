@@ -2,7 +2,8 @@
 <!--
   A settings page that reports success before it knows. Save shows "Settings saved" at once;
   the request behind it fails the first time, and only a small note that appears a moment
-  later says so. An agent that trusts the toast stops with nothing saved.
+  later says so. An agent that trusts the toast stops with nothing saved. Like a real
+  settings page it loads what the server holds, so reloading shows whether a save stuck.
 -->
 <meta charset="utf-8">
 <title>Account settings</title>
@@ -30,6 +31,14 @@
   <p class="note" id="note"></p>
 </main>
 <script>
+  fetch('/api/settings?page=settings')
+    .then((response) => response.json())
+    .then((saved) => {
+      if (saved.twofactor !== undefined) document.getElementById('twofactor').checked = saved.twofactor;
+      if (saved.digest !== undefined) document.getElementById('digest').value = saved.digest;
+      if (saved.display !== undefined) document.getElementById('display').value = saved.display;
+    })
+    .catch((error) => console.debug('settings not loaded', error));
   const values = () => ({
     twofactor: document.getElementById('twofactor').checked,
     digest: document.getElementById('digest').value,

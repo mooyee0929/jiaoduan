@@ -95,10 +95,10 @@ id = "checkout-wizard"
 kind = "form"
 page = "checkout.html"
 commit = "allow"
-prompt = """Open {url} and place an order with these details.
-Full name: Grace Hopper. City: Lyon, France. Postal code: 69002.
-Delivery speed: Express. Gift message: Happy birthday.
-Delivery instructions: Leave at the front desk."""
+prompt = """Open {url} and place an order with these details. Each value is in quotes; enter
+it exactly, without the quotes.
+Full name "Grace Hopper", city "Lyon, France", postal code "69002", delivery speed
+"Express", gift message "Happy birthday", delivery instructions "Leave at the front desk"."""
 
 [[task.expect.submissions.checkout]]
 name = "Grace Hopper"
@@ -114,7 +114,7 @@ kind = "form"
 page = "settings.html"
 prompt = """Open {url}. Turn on two-factor sign-in, set the email digest to Weekly and the display
 name to Ada L., then save. Make sure the settings were really saved, then say done."""
-expect.submissions.settings = [{ twofactor = true, digest = "Weekly", display = "Ada L." }]
+expect.saved.settings = { twofactor = true, digest = "Weekly", display = "Ada L." }
 
 # macOS: the Cocoa fixture app in bench/fixtures/mac, started fresh for each run. `{target}` is
 # what `open` takes to reach it.

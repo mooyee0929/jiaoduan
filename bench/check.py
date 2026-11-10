@@ -62,6 +62,9 @@ def check(task: Task, recorded: Mapping[str, Any], answer: str) -> Verdict:
             continue
         for number, (got, wanted) in enumerate(zip(got_list, wanted_list, strict=True)):
             reasons += _compare(f"{page}[{number}]", got, wanted)
+    saved: Mapping[str, Any] = recorded.get("saved", {})
+    for page, wanted in expect.get("saved", {}).items():
+        reasons += _compare(f"saved.{page}", saved.get(page, {}), wanted)
     for page in expect.get("no_submissions", []):
         if submissions.get(page):
             reasons.append(f"{page} was submitted but should not have been")
