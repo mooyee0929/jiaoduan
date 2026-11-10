@@ -20,7 +20,8 @@ _ROLES: dict[str, Role] = {
     "slider": Role.SLIDER, "spinbutton": Role.SPINBUTTON, "tab": Role.TAB, "tablist": Role.TABLIST,
     "tabpanel": Role.TABPANEL, "menu": Role.MENU, "menubar": Role.MENUBAR,
     "menuitem": Role.MENUITEM, "menuitemcheckbox": Role.MENUITEM, "menuitemradio": Role.MENUITEM,
-    "tree": Role.TREE, "treeitem": Role.TREEITEM, "table": Role.TABLE, "grid": Role.TABLE, "treegrid": Role.TABLE,
+    "tree": Role.TREE, "treeitem": Role.TREEITEM, "table": Role.TABLE, "grid": Role.TABLE,
+    "treegrid": Role.TABLE,
     "row": Role.ROW, "cell": Role.CELL, "gridcell": Role.CELL, "columnheader": Role.COLUMNHEADER,
     "rowheader": Role.COLUMNHEADER, "list": Role.LIST, "listitem": Role.LISTITEM,
     "heading": Role.HEADING, "StaticText": Role.TEXT, "paragraph": Role.GROUP, "image": Role.IMAGE,
@@ -134,6 +135,8 @@ def _states(properties: dict[str, Any], role: Role) -> set[State]:
     pressed = properties.get("pressed")
     if pressed in (True, "true"):
         states.add(State.PRESSED)
+    if properties.get("hasPopup") not in (None, False, "false"):
+        states.add(State.HASPOPUP)
     expanded = properties.get("expanded")
     if expanded is True:
         states.add(State.EXPANDED)

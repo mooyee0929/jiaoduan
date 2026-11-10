@@ -8,7 +8,10 @@ from __future__ import annotations
 from collections.abc import Hashable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
-from typing import NewType, Protocol
+from typing import TYPE_CHECKING, NewType, Protocol
+
+if TYPE_CHECKING:
+    from agentlayer.forms.schema import FormSupport
 
 Ref = NewType("Ref", str)
 SurfaceId = NewType("SurfaceId", str)
@@ -80,6 +83,7 @@ class State(StrEnum):
     MODAL = "modal"
     SCROLLABLE = "scrollable"
     CLICKABLE = "clickable"
+    HASPOPUP = "haspopup"
 
 
 # Named ancestors of these roles tell otherwise identical elements apart.
@@ -245,6 +249,10 @@ class Backend(Protocol):
     async def surfaces(self) -> list[Surface]: ...
 
     async def open(self, target: str, *, guard: bool = True) -> Surface: ...
+
+    async def navigate(self, surface: SurfaceId, target: str) -> None: ...
+
+    def form_support(self) -> FormSupport | None: ...
 
     async def describe(self, surface: SurfaceId) -> Surface: ...
 

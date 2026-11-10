@@ -10,7 +10,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentlayer.backends.web import keys as keymap
 from agentlayer.backends.web.cdp import CdpDisconnected, CdpError, CdpTimeout, Connection, Session
@@ -50,6 +50,9 @@ from agentlayer.model import (
     Surface,
     SurfaceId,
 )
+
+if TYPE_CHECKING:
+    from agentlayer.forms.schema import FormSupport
 
 log = logging.getLogger(__name__)
 
@@ -121,18 +124,38 @@ KEY_CONTEXT_JS = """function () {
   };
 }"""
 
-RELATED_JS = """function (hit) {
-  let walker = hit;
-  while (walker) {
-    if (walker === this) return true;
-    walker = walker.parentNode || walker.host || null;
+# DOM.getNodeForLocation answers in document coordinates once a page has scrolled (Chrome 157),
+# so the hit test runs in the target's own document. The point arrives in the coordinates of the
+# session's viewport; same-process iframes in between are subtracted on the way down.
+HIT_JS = """function (x, y) {
+  const doc = this.ownerDocument;
+  const chain = [];
+  try {
+    for (let w = doc.defaultView; w && w.frameElement; w = w.parent) chain.unshift(w.frameElement);
+  } catch (error) {
+    // A cross-origin parent ends the chain; its frame has its own session and coordinates.
   }
-  walker = this;
-  while (walker) {
-    if (walker === hit) return true;
-    walker = walker.parentNode || walker.host || null;
+  for (const frame of chain) {
+    const box = frame.getBoundingClientRect();
+    const style = frame.ownerDocument.defaultView.getComputedStyle(frame);
+    x -= box.left + frame.clientLeft + parseFloat(style.paddingLeft);
+    y -= box.top + frame.clientTop + parseFloat(style.paddingTop);
   }
-  return hit.control === this || (this.labels && [...this.labels].includes(hit));
+  let hit = doc.elementFromPoint(x, y);
+  while (hit && hit.shadowRoot) {
+    const inner = hit.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === hit) break;
+    hit = inner;
+  }
+  if (!hit) return {ok: false, name: 'nothing'};
+  const within = (node, ancestor) => {
+    for (let w = node; w; w = w.parentNode || w.host || null) if (w === ancestor) return true;
+    return false;
+  };
+  const page = hit === doc.body || hit === doc.documentElement;
+  const ok = within(hit, this) || (!page && within(this, hit)) || hit.control === this
+    || (this.labels ? [...this.labels].includes(hit) : false);
+  return {ok, name: hit.nodeName};
 }"""
 
 LABEL_OF_JS = """function () { return (this.labels && this.labels[0]) || null; }"""
@@ -237,6 +260,7 @@ class WebBackend:
         self._next_surface = 1
         self._tasks: set[asyncio.Task[None]] = set()
         self._open_lock = asyncio.Lock()
+        self._forms: FormSupport | None = None
 
     @property
     def _connection(self) -> Connection:
@@ -245,9 +269,12 @@ class WebBackend:
         return self._conn
 
     async def start(self) -> None:
+        """Idempotent: a second Chrome on the same profile would hand off to the first and exit."""
+        if self._conn is not None:
+            return
         front = None if self._options.headless else _frontmost_bundle()
         extra = list(self._options.extra_args)
-        if self._options.mock_keychain:
+        if self._options.mock_keychain and not self._options.headless:
             extra.append("--use-mock-keychain")
         try:
             self._chrome = await launch_chrome(
@@ -426,9 +453,7 @@ class WebBackend:
         return self._describe(self._page(surface))
 
     async def open(self, target: str, *, guard: bool = True) -> Surface:
-        url = target if "://" in target or target.startswith(("about:", "data:")) else (
-            f"https://{target}"
-        )
+        url = _as_url(target)
         async with self._open_lock:
             page = await self._blank_page() or await self._new_window()
             page.reserved = True
@@ -437,6 +462,16 @@ class WebBackend:
             await self._install_guard(page)
         await self._navigate(page, url)
         return self._describe(page)
+
+    async def navigate(self, surface: SurfaceId, target: str) -> None:
+        await self._navigate(self._page(surface), _as_url(target))
+
+    def form_support(self) -> FormSupport:
+        from agentlayer.forms.drivers.web import WebForms
+
+        if self._forms is None:
+            self._forms = WebForms(self)
+        return self._forms
 
     async def _blank_page(self) -> Page | None:
         return next(
@@ -722,24 +757,12 @@ class WebBackend:
     async def _check_hit(
         self, session: Session, backend_id: int, x: float, y: float
     ) -> None:
-        hit = await session.send("DOM.getNodeForLocation", {
-            "x": int(x), "y": int(y),
-            "includeUserAgentShadowDOM": True, "ignorePointerEventsNone": False,
-        })
-        hit_id = int(hit["backendNodeId"])
-        if hit_id == backend_id:
-            return
-        resolved = await session.send("DOM.resolveNode", {"backendNodeId": hit_id})
-        hit_object = resolved["object"]["objectId"]
-        result = await self._call_on(
-            session, backend_id, RELATED_JS, [{"objectId": hit_object}]
-        )
-        await session.send("Runtime.releaseObject", {"objectId": hit_object})
-        if not result["result"].get("value"):
-            name = await session.send("DOM.describeNode", {"backendNodeId": hit_id})
+        result = await self._call_on(session, backend_id, HIT_JS, [{"value": x}, {"value": y}])
+        verdict = result["result"].get("value") or {}
+        if not verdict.get("ok"):
             raise LayerError(
                 NOT_ACTIONABLE,
-                f"something else is on top of the element: {name['node']['nodeName']}",
+                f"something else is on top of the element: {verdict.get('name', 'unknown')}",
                 hint="close the overlay or scroll, then retry",
             )
 
@@ -879,6 +902,31 @@ class WebBackend:
         web = _web(handle)
         session = page.session_for(web.session_id)
         await session.send("Input.insertText", {"text": text}, timeout=_INPUT_TIMEOUT)
+
+    async def file_inputs(self, surface: SurfaceId) -> list[WebHandle]:
+        """Every file input, hidden ones included: they rarely appear in the accessibility tree."""
+        page = self._page(surface)
+        found: list[WebHandle] = []
+        for session in (page.session, *page.frames.values()):
+            document = await session.send("DOM.getDocument", {"depth": -1, "pierce": True})
+            stack = [document["root"]]
+            while stack:
+                node = stack.pop()
+                attributes = node.get("attributes", [])
+                pairs = dict(zip(attributes[0::2], attributes[1::2], strict=True))
+                if node.get("nodeName") == "INPUT" and pairs.get("type", "").lower() == "file":
+                    found.append(WebHandle(session.session_id, int(node["backendNodeId"])))
+                stack.extend(reversed(node.get("children", [])))
+                stack.extend(node.get("shadowRoots", []))
+                if "contentDocument" in node:
+                    stack.append(node["contentDocument"])
+        return found
+
+
+def _as_url(target: str) -> str:
+    return target if "://" in target or target.startswith(("about:", "data:")) else (
+        f"https://{target}"
+    )
 
 
 def _web(handle: Handle) -> WebHandle:

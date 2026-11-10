@@ -71,7 +71,7 @@ def build_server(client: Client) -> MCPServer[None]:
         role: str | None = None,
         max_nodes: int = 300,
     ) -> str:
-        """Read the UI as text with refs. root drills into a ref; query searches names and values."""
+        """Read the UI as text with refs. root drills into a ref; query searches names."""
         return await client.call(
             "observe", surface=surface, root=root, mode=mode, query=query, role=role,
             max_nodes=max_nodes,

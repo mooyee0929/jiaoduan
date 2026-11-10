@@ -111,7 +111,7 @@ def _json(text: str | None) -> Any:
 async def _dispatch(options: argparse.Namespace) -> str:
     command = options.command
     role = "operator" if command in {"gate", "daemon"} else "agent"
-    spawn = not (command == "daemon")
+    spawn = command != "daemon"
     async with Client(options.agent, role=role, spawn=spawn) as client:
         if command == "surfaces":
             return await client.call("surfaces")

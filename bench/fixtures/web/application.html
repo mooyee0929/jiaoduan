@@ -1,0 +1,264 @@
+<!doctype html>
+<!--
+  A job application form written for testing. It copies no real site; it reproduces widget
+  behaviours that make agents fail:
+  - text fields keep only trusted input in their internal store, like a framework whose
+    state ignores script-written values;
+  - a combobox that loads its options late and filters by substring;
+  - a list button with 200 virtually scrolled options;
+  - a hidden file input, and an upload that re-renders and clears the text fields;
+  - a profile autofill that doubles the first name a moment after the first keystroke;
+  - a yes/no button group whose state shows only in a class name;
+  - a conditional field, and Return in a text field that submits the form.
+  The store is posted to /api/state so a checker can compare it with the expected answer.
+-->
+<meta charset="utf-8">
+<title>Job application</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 24px; max-width: 720px; }
+  label, .field, fieldset { display: block; margin: 10px 0; }
+  .combo { position: relative; display: inline-block; min-width: 260px; border: 1px solid #999;
+           padding: 4px; }
+  .combo-value { display: inline; margin-right: 6px; }
+  .combo ul { position: absolute; left: 0; right: 0; top: 100%; margin: 0; padding: 0;
+              list-style: none; background: #fff; border: 1px solid #999; z-index: 2; }
+  .combo li { padding: 4px; } .combo .loading, .combo .empty { color: #777; padding: 4px; }
+  .vlist { position: absolute; width: 280px; height: 160px; overflow: auto; background: #fff;
+           border: 1px solid #999; z-index: 2; }
+  .vlist .row { position: absolute; left: 0; right: 0; height: 24px; line-height: 24px;
+                padding: 0 6px; }
+  .opt.selected { background: #135; color: #fff; }
+</style>
+<main>
+  <h1>Apply: Platform Engineer</h1>
+  <form id="app" aria-label="Application" method="post" action="/api/submit">
+    <h2>Resume</h2>
+    <div class="upload">
+      <span id="upload-label">Resume/CV</span>
+      <button type="button" id="attach">Attach</button>
+      <input type="file" id="resume" hidden aria-labelledby="upload-label">
+      <span id="filename"></span>
+    </div>
+
+    <h2>About you</h2>
+    <section id="about">
+      <label>First name <input id="first" required data-store="first"></label>
+      <label>Last name <input id="last" required data-store="last"></label>
+      <label>Email <input id="email" type="email" required data-store="email"></label>
+      <label>Phone <input id="phone" data-store="phone" data-mask="phone"></label>
+    </section>
+
+    <label>Country
+      <select id="country">
+        <option value="">Select...</option>
+      </select>
+    </label>
+
+    <div class="field">
+      <span id="degree-label">Degree</span>
+      <div class="combo">
+        <div class="combo-value" id="degree-value"></div>
+        <input id="degree-input" role="combobox" aria-labelledby="degree-label"
+               aria-autocomplete="list" aria-expanded="false" aria-controls="degree-list"
+               autocomplete="off">
+        <ul role="listbox" id="degree-list" hidden></ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <span id="school-label">School</span>
+      <button type="button" id="school" aria-haspopup="listbox"
+              aria-labelledby="school-label school">Select one</button>
+      <div class="vlist" role="listbox" id="school-list" hidden>
+        <div id="school-spacer"></div>
+      </div>
+    </div>
+
+    <fieldset>
+      <legend>Will you require visa sponsorship?</legend>
+      <label><input type="radio" name="sponsor" value="Yes"> Yes</label>
+      <label><input type="radio" name="sponsor" value="No"> No</label>
+    </fieldset>
+    <div id="visa-block" hidden>
+      <label>Visa type <input id="visa" data-store="visa"></label>
+    </div>
+
+    <div class="field">
+      <span>Are you at least 18 years old?</span>
+      <div class="yn">
+        <button type="button" class="opt" data-answer="Yes">Yes</button>
+        <button type="button" class="opt" data-answer="No">No</button>
+      </div>
+    </div>
+
+    <label><input type="checkbox" id="agree"> I agree to the privacy notice</label>
+    <div id="errors" role="alert"></div>
+    <button type="submit">Submit application</button>
+  </form>
+  <p role="status" id="status"></p>
+</main>
+<script>
+  const store = (window.__store = {});
+  const form = document.getElementById('app');
+
+  function post(path, body) {
+    fetch(path, {method: 'POST', body: JSON.stringify(body), keepalive: true})
+      .catch((error) => console.debug('not posted', path, error));
+  }
+  function save(key, value) {
+    store[key] = value;
+    post('/api/state', {page: 'application', store});
+  }
+
+  const countries = ['Argentina', 'Australia', 'Brazil', 'Canada', 'Chile', 'Denmark', 'Egypt',
+    'Finland', 'France', 'Germany', 'India', 'Japan', 'Kenya', 'Mexico', 'Norway', 'Peru',
+    'Singapore', 'Spain', 'Taiwan', 'United Kingdom', 'United States'];
+  const select = document.getElementById('country');
+  for (const name of countries) select.add(new Option(name, name.toLowerCase()));
+  select.addEventListener('change', () => save('country', select.selectedOptions[0].text));
+
+  function formatPhone(raw) {
+    const d = raw.replace(/\D/g, '').slice(0, 10);
+    if (d.length < 4) return d;
+    if (d.length < 7) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
+    return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  }
+
+  let autofilled = false;
+  form.addEventListener('input', (event) => {
+    const el = event.target;
+    if (!el.dataset || !el.dataset.store) return;
+    if (!event.isTrusted) return;  // the store only believes real input
+    if (el.dataset.mask === 'phone') el.value = formatPhone(el.value);
+    save(el.dataset.store, el.value);
+    if (el.id === 'first' && !autofilled) {
+      autofilled = true;
+      setTimeout(() => {  // a profile autofill arriving late and appending
+        const field = document.getElementById('first');
+        field.value = field.value + field.value;
+        save('first', field.value);
+      }, 400);
+    }
+  });
+
+  // Upload: the hidden input does the work; afterwards the About section is rebuilt.
+  const resume = document.getElementById('resume');
+  document.getElementById('attach').addEventListener('click', () => resume.click());
+  resume.addEventListener('change', () => {
+    const file = resume.files[0];
+    if (!file) return;
+    document.getElementById('filename').textContent = file.name;
+    save('resume', file.name);
+    const about = document.getElementById('about');
+    about.innerHTML = about.innerHTML;
+    for (const key of ['first', 'last', 'email', 'phone']) delete store[key];
+  });
+
+  // Degree: options arrive late and match anywhere in the text.
+  const degrees = ['Associate', 'Bachelor of Arts', 'Bachelor of Science', 'Master of Science',
+    'Master of Business Administration', 'Doctor of Philosophy'];
+  const dInput = document.getElementById('degree-input');
+  const dList = document.getElementById('degree-list');
+  const dValue = document.getElementById('degree-value');
+  let dTimer = null;
+  function closeDegree() {
+    dList.hidden = true;
+    dInput.setAttribute('aria-expanded', 'false');
+  }
+  dInput.addEventListener('input', () => {
+    clearTimeout(dTimer);
+    dList.hidden = false;
+    dList.innerHTML = '<li class="loading">Loading...</li>';
+    dTimer = setTimeout(() => {
+      const query = dInput.value.toLowerCase();
+      const hits = degrees.filter((d) => d.toLowerCase().includes(query));
+      dList.innerHTML = hits.map((d) => `<li role="option">${d}</li>`).join('')
+        || '<li class="empty">No options</li>';
+      dInput.setAttribute('aria-expanded', 'true');
+    }, 250);
+  });
+  dList.addEventListener('mousedown', (event) => {
+    const option = event.target.closest('[role=option]');
+    if (!option) return;
+    event.preventDefault();
+    dValue.textContent = option.textContent;
+    dInput.value = '';
+    closeDegree();
+    save('degree', option.textContent);
+  });
+  dInput.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeDegree(); });
+  dInput.addEventListener('blur', () => setTimeout(closeDegree, 150));
+
+  // School: 200 options, only the visible rows exist.
+  const schools = [];
+  const stems = ['Northfield', 'Lakeside', 'Granite', 'Harbor', 'Summit', 'Prairie', 'Cedar',
+    'Bayview', 'Ironwood', 'Meadow'];
+  const kinds = ['University', 'College', 'Institute of Technology', 'State University'];
+  for (let i = 0; i < 200; i++) schools.push(`${stems[i % 10]} ${kinds[(i >> 3) % 4]} ${i + 1}`);
+  schools[57] = 'Riverbend University';
+  const sButton = document.getElementById('school');
+  const sList = document.getElementById('school-list');
+  const spacer = document.getElementById('school-spacer');
+  const ROW = 24;
+  spacer.style.height = `${schools.length * ROW}px`;
+  function renderRows() {
+    for (const row of sList.querySelectorAll('.row')) row.remove();
+    const first = Math.floor(sList.scrollTop / ROW);
+    for (let i = first; i < Math.min(first + 8, schools.length); i++) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.setAttribute('role', 'option');
+      row.style.top = `${i * ROW}px`;
+      row.textContent = schools[i];
+      sList.appendChild(row);
+    }
+  }
+  sButton.addEventListener('click', () => {
+    sList.hidden = !sList.hidden;
+    sButton.setAttribute('aria-expanded', String(!sList.hidden));
+    if (!sList.hidden) { sList.scrollTop = 0; renderRows(); }
+  });
+  sList.addEventListener('scroll', renderRows);
+  sList.addEventListener('click', (event) => {
+    const option = event.target.closest('[role=option]');
+    if (!option) return;
+    sButton.textContent = option.textContent;
+    sList.hidden = true;
+    sButton.setAttribute('aria-expanded', 'false');
+    save('school', option.textContent);
+  });
+
+  // Sponsorship reveals another field.
+  for (const radio of form.querySelectorAll('input[name=sponsor]')) {
+    radio.addEventListener('change', () => {
+      save('sponsor', radio.value);
+      document.getElementById('visa-block').hidden = radio.value !== 'Yes';
+    });
+  }
+
+  // Yes/No buttons: a second click on the chosen one clears it.
+  for (const button of form.querySelectorAll('.opt')) {
+    button.addEventListener('click', () => {
+      const wasOn = button.classList.contains('selected');
+      for (const other of form.querySelectorAll('.opt')) other.classList.remove('selected');
+      if (!wasOn) button.classList.add('selected');
+      save('adult', wasOn ? '' : button.dataset.answer);
+    });
+  }
+
+  document.getElementById('agree').addEventListener('change', (event) => {
+    save('agree', event.target.checked);
+  });
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const missing = ['first', 'last', 'email'].filter((k) => !store[k]);
+    if (missing.length) {
+      document.getElementById('errors').textContent = `Missing: ${missing.join(', ')}`;
+      return;
+    }
+    window.__submitted = true;
+    post('/api/submit', {page: 'application', store});
+    document.getElementById('status').textContent = 'Application submitted';
+  });
+</script>

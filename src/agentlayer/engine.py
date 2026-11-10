@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from collections.abc import Mapping, Sequence
@@ -10,7 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentlayer import prune, render
-from agentlayer.claims import Claims
+from agentlayer.adapters.registry import AdapterRegistry
+from agentlayer.claims import Claims, SessionLocks
 from agentlayer.diff import Effect, diff
 from agentlayer.errors import (
     BACKEND_UNAVAILABLE,
@@ -18,9 +20,13 @@ from agentlayer.errors import (
     NO_ACCESSIBLE_TREE,
     NO_SURFACE,
     NOT_ACTIONABLE,
+    NOT_SUPPORTED,
     LayerError,
 )
 from agentlayer.expect import ExpectResult, Scene, check
+from agentlayer.forms.fill import FillLine, FormIds, render_fill, render_schema
+from agentlayer.forms.fill import fill as fill_form
+from agentlayer.forms.schema import DriverContext, Field, WriteStatus, collect
 from agentlayer.gate import Gate, Policy, commit_reason
 from agentlayer.model import (
     Action,
@@ -44,12 +50,23 @@ WAIT_POLL = 0.2
 MAX_WAIT = 60.0
 _URL_LIKE = re.compile(r"^[a-z][a-z0-9+.-]*:|^[\w-]+(\.[\w-]+)+(/|$)", re.IGNORECASE)
 _ACTIONS = {kind.value: kind for kind in ActionKind}
+_GOOD_WRITES = frozenset({WriteStatus.OK, WriteStatus.UNCHANGED})
+
+
+@dataclass(frozen=True)
+class Report:
+    agent: str
+    status: str
+    note: str
+    artifacts: tuple[str, ...]
+    at: float
 
 
 @dataclass
 class AgentState:
     refs: RefTable = field(default_factory=RefTable)
     views: dict[SurfaceId, list[Node]] = field(default_factory=dict)
+    forms: dict[SurfaceId, FormIds] = field(default_factory=dict)
     current: SurfaceId | None = None
 
 
@@ -61,15 +78,19 @@ class Engine:
         gate: Gate | None = None,
         trace: Trace | None = None,
         claims: Claims | None = None,
+        adapters: AdapterRegistry | None = None,
     ) -> None:
         self._backends = dict(backends)
         self.gate = gate or Gate()
         self._trace = trace or Trace(None)
         self.claims = claims or Claims()
+        self.adapters = adapters or AdapterRegistry.from_env()
         self._agents: dict[str, AgentState] = {}
         self._locks: dict[SurfaceId, asyncio.Lock] = {}
         self._started: set[str] = set()
         self._start_lock = asyncio.Lock()
+        self.session_locks = SessionLocks()
+        self._reports: list[Report] = []
 
     async def _ensure_started(self, key: str) -> Backend:
         """Backends start on first use, so an unused browser is never launched."""
@@ -206,6 +227,15 @@ class Engine:
         surface: str | None = None,
         timeout: float = 10.0,
     ) -> str:
+        return (await self.wait_result(agent, expect, surface, timeout))[1]
+
+    async def wait_result(
+        self,
+        agent: str,
+        expect: Mapping[str, object],
+        surface: str | None = None,
+        timeout: float = 10.0,
+    ) -> tuple[bool, str]:
         chosen = self._surface(agent, surface)
         backend = self.backend_for(chosen)
         limit = min(max(timeout, 0.0), MAX_WAIT)
@@ -220,7 +250,7 @@ class Engine:
             if result.ok or elapsed >= limit:
                 outcome = "met" if result.ok else "NOT met"
                 ms = int(elapsed * 1000)
-                return f"wait {result.kind}: {outcome} after {ms}ms ({result.detail})"
+                return result.ok, f"wait {result.kind}: {outcome} after {ms}ms ({result.detail})"
             await asyncio.sleep(WAIT_POLL)
 
     # Actions
@@ -234,6 +264,7 @@ class Engine:
         expect: Sequence[Mapping[str, object]] | Mapping[str, object] | None = None,
         gate: str | None = None,
         settle_budget: float = DEFAULT_SETTLE,
+        force_commit: bool = False,
     ) -> str:
         state = self.state(agent)
         entry = state.refs.lookup(ref)
@@ -245,7 +276,7 @@ class Engine:
         try:
             async with self._lock(surface):
                 text, delivery, evidence, url = await self._act_locked(
-                    agent, entry.ref, kind, value, expect, gate, settle_budget
+                    agent, entry.ref, kind, value, expect, gate, settle_budget, force_commit
                 )
         except LayerError as exc:
             self._trace.write(TraceRecord(
@@ -272,6 +303,7 @@ class Engine:
         expect: Sequence[Mapping[str, object]] | Mapping[str, object] | None,
         gate_token: str | None,
         settle_budget: float,
+        force_commit: bool = False,
     ) -> tuple[str, Delivery, Evidence, str]:
         state = self.state(agent)
         before, first = await self.read_surface(agent, state.refs.lookup(ref).surface)
@@ -288,7 +320,7 @@ class Engine:
         if kind is ActionKind.TOGGLE and self._already(target, value):
             return await self._noop(agent, surface, target, before, kind, expect)
 
-        await self._check_commit(agent, surface, entry, target, kind, gate_token)
+        await self._check_commit(agent, surface, entry, target, kind, gate_token, force_commit)
         mark = backend.begin(surface)
         delivery = await backend.perform(surface, entry.handle, self._action(kind, value))
         settle = await backend.settle(surface, mark, settle_budget)
@@ -332,11 +364,14 @@ class Engine:
         target: Node,
         kind: ActionKind,
         token: str | None,
+        forced: bool = False,
     ) -> None:
         if kind not in {ActionKind.PRESS, ActionKind.DOUBLE}:
             return
         backend = self.backend_for(surface)
-        reason = commit_reason(target, await backend.commit_facts(surface, entry.handle))
+        reason = "the adapter marks it as a commit" if forced else commit_reason(
+            target, await backend.commit_facts(surface, entry.handle)
+        )
         if reason is not None:
             self.gate.require(
                 agent=agent, surface=surface, ref=entry.ref, action=kind.value,
@@ -451,6 +486,96 @@ class Engine:
         return render.action_text(
             f"key {keys}", None, delivery, Evidence.NONE, effect, (), (), view
         )
+
+    # Forms
+
+    def form_ids(self, agent: str, surface: SurfaceId) -> FormIds:
+        return self.state(agent).forms.setdefault(surface, FormIds())
+
+    def driver_context(self, agent: str, surface: SurfaceId) -> DriverContext:
+        support = self.backend_for(surface).form_support()
+        if support is None:
+            raise LayerError(NOT_SUPPORTED, f"{surface} has no form support")
+        return DriverContext(self, agent, surface, support)
+
+    async def form_fields(
+        self, agent: str, surface: str | None = None, root: str | None = None
+    ) -> tuple[SurfaceId, list[Field]]:
+        chosen = self._surface(agent, surface)
+        async with self._lock(chosen):
+            return chosen, await collect(self.driver_context(agent, chosen), root)
+
+    async def form(self, agent: str, surface: str | None = None, root: str | None = None) -> str:
+        chosen, fields = await self.form_fields(agent, surface, root)
+        info = await self.backend_for(chosen).describe(chosen)
+        return render_schema(chosen, info.title, fields)
+
+    async def fill_lines(
+        self,
+        agent: str,
+        values: Mapping[str, str],
+        surface: str | None = None,
+        root: str | None = None,
+    ) -> tuple[list[FillLine], list[Field], list[Field]]:
+        chosen = self._surface(agent, surface)
+        started = time.monotonic()
+        async with self._lock(chosen):
+            result = await fill_form(self.driver_context(agent, chosen), values, root)
+        elapsed = int((time.monotonic() - started) * 1000)
+        for line in result[0]:
+            outcome = line.outcome
+            written = values.get(line.field_id) or values.get(line.label) or ""
+            self._trace.write(TraceRecord(
+                agent=agent, surface=chosen, op="fill", ok=outcome.status in _GOOD_WRITES,
+                ms=elapsed, action=line.kind, locator=line.locator, text_len=len(written),
+                evidence=outcome.evidence.label, code=outcome.status.value,
+            ))
+        return result
+
+    async def fill(
+        self,
+        agent: str,
+        values: Mapping[str, str],
+        surface: str | None = None,
+        root: str | None = None,
+    ) -> str:
+        return render_fill(*await self.fill_lines(agent, values, surface, root))
+
+    # Adapters and reports
+
+    async def tools(self, agent: str, surface: str | None = None) -> str:
+        from agentlayer.adapters.runner import list_tools
+
+        chosen = self._surface(agent, surface)
+        return list_tools(self.adapters.matching(await self.backend_for(chosen).describe(chosen)))
+
+    async def call_tool(
+        self,
+        agent: str,
+        name: str,
+        arguments: Mapping[str, object],
+        surface: str | None = None,
+        gate: str | None = None,
+    ) -> str:
+        from agentlayer.adapters.runner import run_tool
+
+        chosen = self._surface(agent, surface)
+        return await run_tool(self, agent, chosen, name, arguments, gate)
+
+    def report(
+        self, agent: str, status: str, note: str | None, artifacts: Sequence[str]
+    ) -> str:
+        if status not in {"done", "partial", "blocked"}:
+            raise LayerError(INVALID_ARGS, "status is done, partial or blocked")
+        self._reports.append(Report(agent, status, note or "", tuple(artifacts), time.time()))
+        return f"recorded: {status}"
+
+    def reports_json(self) -> str:
+        return json.dumps([
+            {"agent": r.agent, "status": r.status, "note": r.note,
+             "artifacts": list(r.artifacts), "at": r.at}
+            for r in self._reports
+        ])
 
     # Lifecycle
 

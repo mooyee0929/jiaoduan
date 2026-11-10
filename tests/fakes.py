@@ -69,6 +69,12 @@ class FakeBackend:
         self.location = target
         return await self.describe(SURFACE)
 
+    async def navigate(self, surface: SurfaceId, target: str) -> None:
+        self.location = target
+
+    def form_support(self) -> None:
+        return None
+
     async def describe(self, surface: SurfaceId) -> Surface:
         return Surface(surface, "fake", "Fake", self.location)
 

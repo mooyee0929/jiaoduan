@@ -8,3 +8,4 @@ dist/
 bench/results/
 spikes/out/
 .chrome-profile/
+.claude/
