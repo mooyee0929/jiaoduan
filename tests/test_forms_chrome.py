@@ -239,3 +239,19 @@ def test_upload_through_the_button_that_opens_the_file_chooser() -> None:
                 return await store(engine, opened.split()[0])
 
     assert run(scenario())["resume"] == "resume.pdf"
+
+
+def test_set_on_a_dropdown_that_takes_no_text_chooses_the_option() -> None:
+    async def scenario() -> tuple[str, dict[str, Any]]:
+        with serve() as (host, _):
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/application.html")
+                seen = await engine.observe("a", mode="full")
+                result = await engine.act(
+                    "a", ref_named(seen, "combobox", "Country"), "set", "Japan"
+                )
+                return result, await store(engine, opened.split()[0])
+
+    result, state = run(scenario())
+    assert result.startswith('select combobox "Country"'), result
+    assert state["country"] == "Japan"

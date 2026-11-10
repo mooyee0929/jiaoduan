@@ -38,6 +38,7 @@ from agentlayer.model import (
     Evidence,
     Node,
     Ref,
+    Role,
     Settle,
     State,
     Surface,
@@ -325,7 +326,12 @@ class Engine:
 
         if kind is ActionKind.TOGGLE and self._already(target, value):
             return await self._noop(agent, surface, target, before, kind, expect)
-        if kind is ActionKind.SELECT:
+        # Typing into a dropdown that takes no text does nothing; choosing is what was meant.
+        # A combobox that takes text keeps `set` as typing, so it can be used to filter.
+        chooses = target.role in {Role.COMBOBOX, Role.LISTBOX} and State.EDITABLE not in (
+            target.states
+        )
+        if kind is ActionKind.SELECT or (kind is ActionKind.SET and chooses):
             return await self._select(
                 agent, surface, target, before, value or "", expect, settle_budget
             )

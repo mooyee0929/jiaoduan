@@ -82,8 +82,8 @@ def build_server(client: Client) -> MCPServer[None]:
     async def act(
         ref: str,
         action: Literal[
-            "press", "double", "right", "hover", "focus", "set", "append", "toggle", "scroll",
-            "upload",
+            "press", "double", "right", "hover", "focus", "set", "append", "toggle", "select",
+            "scroll", "upload",
         ],
         value: str | None = None,
         expect: Expect = None,
@@ -91,8 +91,11 @@ def build_server(client: Client) -> MCPServer[None]:
     ) -> str:
         """Act on a ref and report what changed.
 
-        value: text for set/append, on|off for toggle, up|down|left|right for scroll, a path
-        for upload. expect: postconditions such as {"text_visible": "Saved"}, {"value": "x"},
+        value: text for set/append; an option's text for select (dropdowns, comboboxes, radio
+        groups, yes/no buttons: it opens, finds and picks the option, and reads it back); on|off
+        for toggle; up|down|left|right for scroll; a file path for upload (on the file input or
+        on the button that opens the file picker).
+        expect: postconditions such as {"text_visible": "Saved"}, {"value": "x"},
         {"appears": {"role": "button", "name": "Next"}}, {"gone": "Loading"}, {"url": "regex"},
         {"request": {"method": "POST", "url": "regex"}}.
         """
