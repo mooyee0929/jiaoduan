@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,8 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 RUN_TIMEOUT = 600.0
 RESUME = b"%PDF-1.4\n% benchmark resume\n"
 _DROPPED_ENV = ("CLAUDE_CODE_PLUGIN_DIRS",)
+USAGE_LIMIT = "usage limit reached"
+_LIMIT = re.compile(r"hit your [\w -]*limit", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,8 @@ def run_once(task: Task, arm: Arm, model: str) -> dict[str, Any]:
         finally:
             if arm.server == "agent-layer":
                 _stop_daemon(home)
+        if _LIMIT.search(usage.answer):
+            usage = Usage(**{**asdict(usage), "error": USAGE_LIMIT})
         time.sleep(0.3)
         verdict = check(task, fixture.recorded(), usage.answer)
     return {
@@ -290,6 +295,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     out = RESULTS / f"{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
     for number, (task, arm) in enumerate(plan, start=1):
         record = run_once(task, arm, options.model)
+        if record["error"] == USAGE_LIMIT:
+            # Not the task's failure: the model never ran. Stop rather than record noise.
+            print(f"[{number}/{len(plan)}] stopped: {record['answer'].strip()[:120]}")
+            print(f"results so far: {out}")
+            return 2
         with out.open("a", encoding="utf-8") as sink:
             sink.write(json.dumps(record) + "\n")
         status = "ok" if record["ok"] else "FAIL " + "; ".join(record["reasons"])[:120]

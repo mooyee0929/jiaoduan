@@ -262,15 +262,24 @@ commit policy, to prove the task can be passed and the checker accepts a correct
 
 Reports give success rates with Wilson intervals, and token counts with bootstrap intervals.
 
-### Results (2026-11-09)
+### Results (2026-11-09 and 11-10)
 
 Setup:
 
 - Model: `claude-sonnet-5-5`, Playwright MCP 0.0.83, Chrome 157, 3 runs per cell.
 - Input tokens include cached tokens, so the `$` column, which prices them, is the fairer cost.
-- Raw records are in [`bench/published/2026-11-09.jsonl`](bench/published/2026-11-09.jsonl).
-- This run covers the first three tasks. The other seven have passed the scripted smoke
-  run but have not been run with a model yet.
+- Raw records are in [`bench/published/2026-11-09.jsonl`](bench/published/2026-11-09.jsonl)
+  (99 runs). Runs of task versions later fixed are kept apart in
+  [`2026-11-09-superseded.jsonl`](bench/published/2026-11-09-superseded.jsonl) (36 runs).
+
+Totals:
+
+| Arm | Web tasks passed | macOS tasks passed |
+| --- | --- | --- |
+| A, screenshots | 17/24 | not run |
+| B, snapshots | 20/24 | not run |
+| C, elements | 23/24 | 6/6 |
+| D, forms (form tasks only) | 15/15 | 6/6 |
 
 | task | arm | success (95% CI) | input tokens | vs B | tool calls | s | $ |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -278,6 +287,18 @@ Setup:
 | application-fill | B | 2/3 (21%-94%) | 877,888 |  | 104.7 | 117 | 0.320 |
 | application-fill | C | 3/3 (44%-100%) | 55,477 | -94% | 16.3 | 22 | 0.054 |
 | application-fill | D | 3/3 (44%-100%) | 38,147 | -96% | 10.0 | 17 | 0.038 |
+| application-visa | A | 1/3 (6%-79%) | 368,747 | +21% | 83.3 | 55 | 0.220 |
+| application-visa | B | 0/3 (0%-56%) | 303,830 |  | 36.3 | 53 | 0.131 |
+| application-visa | C | 2/3 (21%-94%) | 63,779 | -79% | 18.3 | 24 | 0.058 |
+| application-visa | D | 3/3 (44%-100%) | 44,412 | -85% | 10.7 | 20 | 0.041 |
+| checkout-wizard | A | 3/3 (44%-100%) | 193,706 | +71% | 88.0 | 46 | 0.179 |
+| checkout-wizard | B | 3/3 (44%-100%) | 113,065 |  | 16.7 | 28 | 0.053 |
+| checkout-wizard | C | 3/3 (44%-100%) | 61,981 | -45% | 11.7 | 22 | 0.041 |
+| checkout-wizard | D | 3/3 (44%-100%) | 56,919 | -50% | 9.0 | 22 | 0.035 |
+| settings-save | A | 3/3 (44%-100%) | 149,920 | +108% | 35.0 | 29 | 0.116 |
+| settings-save | B | 3/3 (44%-100%) | 72,028 |  | 11.3 | 22 | 0.045 |
+| settings-save | C | 3/3 (44%-100%) | 50,257 | -30% | 10.0 | 18 | 0.039 |
+| settings-save | D | 3/3 (44%-100%) | 53,282 | -26% | 10.0 | 18 | 0.040 |
 | contact-send | A | 0/3 (0%-56%) | 126,094 | +211% | 38.3 | 32 | 0.111 |
 | contact-send | B | 3/3 (44%-100%) | 40,552 |  | 5.7 | 13 | 0.029 |
 | contact-send | C | 3/3 (44%-100%) | 22,862 | -44% | 4.0 | 9 | 0.023 |
@@ -285,29 +306,53 @@ Setup:
 | orders-lookup | A | 3/3 (44%-100%) | 34,976 | +39% | 5.0 | 10 | 0.040 |
 | orders-lookup | B | 3/3 (44%-100%) | 25,087 |  | 3.0 | 8 | 0.017 |
 | orders-lookup | C | 3/3 (44%-100%) | 20,729 | -17% | 2.0 | 7 | 0.024 |
+| orders-count | A | 3/3 (44%-100%) | 19,361 | -42% | 2.0 | 8 | 0.026 |
+| orders-count | B | 3/3 (44%-100%) | 33,397 |  | 2.3 | 8 | 0.070 |
+| orders-count | C | 3/3 (44%-100%) | 23,729 | -29% | 2.0 | 8 | 0.038 |
+| doc-lookup | A | 3/3 (44%-100%) | 39,737 | +67% | 5.3 | 13 | 0.031 |
+| doc-lookup | B | 3/3 (44%-100%) | 23,838 |  | 2.0 | 7 | 0.029 |
+| doc-lookup | C | 3/3 (44%-100%) | 36,468 | +53% | 2.7 | 8 | 0.052 |
+| mac-fill | C | 3/3 (44%-100%) | 24,116 |  | 6.0 | 11 | 0.024 |
+| mac-fill | D | 3/3 (44%-100%) | 22,577 |  | 3.3 | 11 | 0.019 |
+| mac-save | C | 3/3 (44%-100%) | 22,944 |  | 4.0 | 10 | 0.020 |
+| mac-save | D | 3/3 (44%-100%) | 24,586 |  | 4.0 | 10 | 0.020 |
 
 What this does and does not show:
 
-- **The gap is on the hard form.** Snapshots (B) needed 105 tool calls and $0.32 per
-  application. The traps include a late autofill, a virtual list and a re-render on upload.
-  This layer needed 10-16 calls and $0.04-0.05, and every one of its runs left the right
-  values in the page's own state.
-- **Easy pages are close.** Contact form and table lookup differ by a few calls. On the lookup,
-  C used fewer tokens but cost more than B.
+- **The gap is on hard forms.** On the two application forms, snapshots (B) passed 2 of 6
+  runs at $0.13-0.32 each. In all three visa runs, B left the two custom dropdowns
+  (degree, school) empty. This layer used 79-96% fewer input tokens and passed 11 of 12. The
+  miss was one C run that skipped a yes/no button.
+- **Multi-step forms save about half.** The checkout and settings tasks passed in every arm.
+  C and D used 26-50% fewer tokens than B and cost $0.035-0.041 a run, against $0.045-0.053.
+- **Reading is not where this layer helps.** On the three lookup tasks every arm passed. C
+  used fewer tokens than B on two and 53% more on the long document. In dollars it was
+  cheaper on only one of the three.
 - **Screenshots (A) lost the most.** Lacking feedback that a click had worked, it sent the
-  contact form twice in two of three runs.
+  contact form twice in two of three runs. On forms it needed 35-89 tool calls where this
+  layer needed 3-18.
+- **No one was fooled by the false "Saved".** In two earlier versions of the settings task
+  that did not ask for a retry, every run in every arm saw that the first save had failed,
+  and none claimed a save that had not happened. Only 2 of 24 retried without being asked.
+  The task therefore now asks for a retry, which measures finishing the job rather than the
+  model's appetite for retrying.
+- **macOS has no comparison arm.** The screenshot-and-mouse alternative would take over the
+  person's pointer, and the fixture window sits off screen. The macOS rows show only that both
+  of this layer's arms finish native tasks at about 23k tokens.
 - **Three runs per cell is not much.** The intervals are wide, and success rates overlap
-  everywhere except the application form.
-- **We wrote the fixtures.** They imitate failure patterns, not a real site, and a layer can be
-  tuned to its own tests. The first full run is how that showed: it exposed three bugs in this
-  layer.
-  - `select` was missing from the MCP tool.
-  - Upload did not work through the button that opens the file picker.
-  - `set` on a native dropdown did nothing.
-
-  C failed the application all three times, and twice sent it with Enter. The C and D rows
-  above are after those fixes. A and B are from the first run, whose harness and tasks were
-  otherwise identical.
+  everywhere except the application forms.
+- **We wrote the fixtures and the checker, and both had bugs.** They imitate failure patterns,
+  not a real site, and a layer can be tuned to its own tests.
+  - The first full run exposed three bugs in this layer. C failed the application all three
+    times, twice sending it with Enter. The C and D rows for the first three tasks are after
+    the fixes:
+    - `select` was missing from the MCP tool;
+    - upload did not work through a button that opens the file picker;
+    - `set` on a native dropdown did nothing.
+  - Two task bugs made tasks impossible for every arm, and those runs are in the superseded
+    file:
+    - the checkout prompt ended a value with a full stop that every agent typed;
+    - the settings page did not show saved values after a reload.
 - **The gate policy differs by arm.** This layer's arms run with its shipped default, `ask`;
   Playwright has no gate. Only tasks whose job is to submit (`contact-send`,
   `checkout-wizard`, `mac-save`) run with `allow`.

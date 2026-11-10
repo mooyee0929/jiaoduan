@@ -153,6 +153,14 @@ def test_stream_json_totals_tokens_tool_calls_and_cost() -> None:
     assert parse_stream([], 1.0).error == "no result event"
 
 
+def test_a_usage_limit_message_is_recognised_as_no_run_at_all() -> None:
+    from bench.run import _LIMIT
+
+    assert _LIMIT.search("You've hit your 5-hour limit · resets 12am (America/Detroit)")
+    assert _LIMIT.search("You have hit your weekly usage limit")
+    assert not _LIMIT.search("Done. The digest is set to Weekly.")
+
+
 def test_wilson_interval_stays_inside_zero_and_one() -> None:
     low, high = wilson(0, 5)
     assert low == 0.0 and 0.4 < high < 0.5
