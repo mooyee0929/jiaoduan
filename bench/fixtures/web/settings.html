@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  A settings page that reports success before it knows. Save shows "Settings saved" at once;
+  the request behind it fails the first time, and only a small note that appears a moment
+  later says so. An agent that trusts the toast stops with nothing saved.
+-->
+<meta charset="utf-8">
+<title>Account settings</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 24px; max-width: 560px; }
+  label { display: block; margin: 10px 0; }
+  .toast { background: #135; color: #fff; padding: 6px 10px; display: inline-block; }
+  .note { color: #a33; font-size: 12px; }
+</style>
+<main>
+  <h1>Account settings</h1>
+  <form id="settings" aria-label="Settings">
+    <label><input type="checkbox" id="twofactor"> Two-factor sign-in</label>
+    <label>Email digest
+      <select id="digest">
+        <option>Off</option>
+        <option>Daily</option>
+        <option>Weekly</option>
+      </select>
+    </label>
+    <label>Display name <input id="display"></label>
+    <button type="button" id="save">Save changes</button>
+  </form>
+  <div id="toast" aria-live="polite"></div>
+  <p class="note" id="note"></p>
+</main>
+<script>
+  const values = () => ({
+    twofactor: document.getElementById('twofactor').checked,
+    digest: document.getElementById('digest').value,
+    display: document.getElementById('display').value,
+  });
+  document.getElementById('save').addEventListener('click', async () => {
+    const toast = document.getElementById('toast');
+    const note = document.getElementById('note');
+    toast.innerHTML = '<span class="toast">Settings saved</span>';
+    note.textContent = '';
+    try {
+      const response = await fetch('/api/save', {
+        method: 'POST', body: JSON.stringify({page: 'settings', store: values()}),
+      });
+      if (!response.ok) {
+        setTimeout(() => { note.textContent = 'Some changes may not have been kept.'; }, 1000);
+      }
+    } catch (error) {
+      note.textContent = `Not saved: ${error}`;
+    }
+  });
+</script>

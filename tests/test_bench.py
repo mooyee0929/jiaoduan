@@ -6,21 +6,65 @@ from pathlib import Path
 import pytest
 
 from bench.check import Task, check, load_tasks
+from bench.fixture_server import Recorder, suggest
 from bench.report import aggregate, bootstrap_mean, table, wilson
 from bench.run import claude_command, load_arms, mcp_config, parse_stream
+from bench.solutions import SOLUTIONS
 
 
 def contact_task() -> Task:
     return next(t for t in load_tasks() if t.id == "contact-send")
 
 
+def task(task_id: str) -> Task:
+    return next(t for t in load_tasks() if t.id == task_id)
+
+
 def test_every_task_and_arm_file_loads() -> None:
     tasks = {t.id for t in load_tasks()}
-    assert tasks == {"contact-send", "application-fill", "orders-lookup"}
+    assert set(SOLUTIONS) == tasks
     arms = load_arms()
     assert set(arms) == {"A", "B", "C", "D"}
     reading = next(t for t in load_tasks() if t.kind == "read")
     assert not arms["D"].applies(reading) and arms["C"].applies(reading)
+
+
+def test_playwright_arms_skip_the_mac_tasks() -> None:
+    arms = load_arms()
+    mac = task("mac-fill")
+    assert mac.platform == "mac" and task("contact-send").platform == "web"
+    assert not arms["A"].applies(mac) and not arms["B"].applies(mac)
+    assert arms["C"].applies(mac) and arms["D"].applies(mac)
+
+
+@pytest.mark.parametrize("answer, ok", [
+    ("29", True), ("There are 29 refunded orders.", True), ("29 of 120", False),
+    ("2.9", False), ("none", False),
+])
+def test_a_count_must_be_exactly_one_number(answer: str, ok: bool) -> None:
+    assert check(task("orders-count"), {}, answer).ok is ok
+
+
+def test_the_mac_task_reads_the_app_state() -> None:
+    wanted = dict(task("mac-fill").expect["state"]["mac"])
+    assert check(task("mac-fill"), {"state": {"mac": wanted}}, "done").ok
+    pressed = {**wanted, "saved": 1}
+    assert not check(task("mac-fill"), {"state": {"mac": pressed}}, "done").ok
+
+
+def test_city_suggestions_are_substring_matches_capped_at_six() -> None:
+    assert suggest("lyon")[:2] == ["Lyon, France", "Lyons, Colorado, USA"]
+    assert len(suggest("l")) == 6
+    assert suggest("") == [] and suggest("zzz") == []
+
+
+def test_the_first_save_of_a_page_fails_and_is_not_recorded() -> None:
+    recorder = Recorder()
+    body = {"page": "settings", "store": {"digest": "Weekly"}}
+    assert recorder.record("/api/save", body) == 500
+    assert recorder.snapshot()["submissions"] == {}
+    assert recorder.record("/api/save", body) == 200
+    assert recorder.snapshot()["submissions"] == {"settings": [{"digest": "Weekly"}]}
 
 
 def test_no_arm_may_run_page_javascript() -> None:
@@ -42,8 +86,8 @@ def test_commands_disable_built_in_tools_and_other_servers(tmp_path: Path) -> No
     assert "--snapshot-mode=none" in vision.command
     env = mcp_config(arm, tmp_path)["mcpServers"]["agent-layer"]["env"]
     assert env["AGENTLAYER_COMMIT"] == "ask"
-    tasks = {t.id: t.commit for t in load_tasks()}
-    assert tasks == {"contact-send": "allow", "application-fill": "ask", "orders-lookup": "ask"}
+    committing = {t.id for t in load_tasks() if t.commit == "allow"}
+    assert committing == {"contact-send", "checkout-wizard", "mac-save"}
     assert env["AGENTLAYER_PROFILE"].startswith(str(tmp_path))
 
 

@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- A long service agreement for lookup tasks. Forty numbered sections of generated text, with
+     several "N days" figures, only one of which answers the question about termination. -->
+<meta charset="utf-8">
+<title>Service agreement</title>
+<style>body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 760px; }</style>
+<main id="doc">
+  <h1>Service agreement</h1>
+  <p>Effective 1 March 2026. This agreement covers the hosted service and its support.</p>
+</main>
+<script>
+  const topics = ['Definitions', 'Accounts', 'Acceptable use', 'Fees', 'Invoices', 'Taxes',
+    'Service levels', 'Support', 'Late payment', 'Data protection', 'Security', 'Subprocessors',
+    'Confidentiality', 'Termination', 'Effect of termination', 'Suspension', 'Warranties',
+    'Disclaimers', 'Indemnity', 'Limitation of liability', 'Insurance', 'Audits', 'Exports',
+    'Assignment', 'Subcontracting', 'Notices', 'Force majeure', 'Publicity', 'Feedback',
+    'Beta features', 'Third-party services', 'Changes to the service', 'Changes to terms',
+    'Governing law', 'Disputes', 'Severability', 'Waiver', 'Entire agreement', 'Counterparts',
+    'Contact'];
+  const days = {Invoices: 30, 'Late payment': 15, Suspension: 10, 'Effect of termination': 60,
+    'Changes to terms': 20, Support: 2, Termination: 45};
+  const filler = ['The parties agree that', 'Unless stated otherwise,', 'For clarity,',
+    'Subject to the other sections,', 'Where this section applies,'];
+  const doc = document.getElementById('doc');
+  topics.forEach((topic, index) => {
+    const section = document.createElement('section');
+    const heading = document.createElement('h2');
+    heading.textContent = `${index + 1}. ${topic}`;
+    section.appendChild(heading);
+    for (let p = 0; p < 3; p++) {
+      const para = document.createElement('p');
+      let text = `${filler[(index + p) % filler.length]} the provisions on ${topic.toLowerCase()} `
+        + 'apply to every order form signed under this agreement and to any renewal of it.';
+      if (p === 1 && days[topic] !== undefined) {
+        text = topic === 'Termination'
+          ? `Either party may end this agreement for convenience by giving ${days[topic]} days' written notice to the other party.`
+          : `Any period under this section is ${days[topic]} days from the relevant date.`;
+      }
+      para.textContent = text;
+      section.appendChild(para);
+    }
+    doc.appendChild(section);
+  });
+</script>

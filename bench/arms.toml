@@ -42,6 +42,7 @@ command = ["npx", "-y", "@playwright/mcp@0.0.83", "--headless", "--isolated",
            "--browser=chrome", "--caps=vision", "--snapshot-mode=none"]
 tools = ["browser_navigate", "browser_take_screenshot", "browser_mouse_click_xy",
          "browser_press_key", "browser_wait_for", "browser_file_upload"]
+platforms = ["web"]
 
 [arm.B]
 label = "accessibility snapshot (Playwright MCP default)"
@@ -52,6 +53,7 @@ tools = ["browser_navigate", "browser_snapshot", "browser_click", "browser_type"
          "browser_press_key", "browser_select_option", "browser_fill_form",
          "browser_file_upload", "browser_wait_for", "browser_hover", "browser_find",
          "browser_handle_dialog", "browser_tabs"]
+platforms = ["web"]
 
 [arm.C]
 label = "agent-layer elements (observe and act)"

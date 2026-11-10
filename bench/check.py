@@ -11,6 +11,7 @@ from typing import Any
 
 TASKS = Path(__file__).parent / "tasks.toml"
 _MONEY = re.compile(r"\$\s?[\d,]+(?:\.\d{2})?")
+_NUMBER = re.compile(r"(?<![\w.])\d[\d,]*(?![\w.]\d)")
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class Task:
     prompt: str
     expect: Mapping[str, Any]
     commit: str = "ask"
+    platform: str = "web"
 
 
 @dataclass(frozen=True)
@@ -33,7 +35,7 @@ def load_tasks(path: Path = TASKS) -> list[Task]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     return [
         Task(str(t["id"]), str(t["kind"]), str(t["page"]), str(t["prompt"]), t["expect"],
-             str(t.get("commit", "ask")))
+             str(t.get("commit", "ask")), str(t.get("platform", "web")))
         for t in data["task"]
     ]
 
@@ -68,4 +70,9 @@ def check(task: Task, recorded: Mapping[str, Any], answer: str) -> Verdict:
         found = _MONEY.findall(answer)
         if [m.replace(" ", "") for m in found] != [wanted_answer]:
             reasons.append(f"answer: wanted {wanted_answer}, got {answer.strip()[:80]!r}")
+    wanted_number = expect.get("number")
+    if wanted_number is not None:
+        numbers = [int(n.replace(",", "")) for n in _NUMBER.findall(answer)]
+        if numbers != [int(wanted_number)]:
+            reasons.append(f"answer: wanted {wanted_number}, got {answer.strip()[:80]!r}")
     return Verdict(not reasons, tuple(reasons))

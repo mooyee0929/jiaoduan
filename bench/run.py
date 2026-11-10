@@ -19,14 +19,21 @@ import sys
 import tempfile
 import time
 import tomllib
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from agentlayer.adapters.registry import AdapterRegistry
+from agentlayer.engine import Engine
+from agentlayer.errors import LayerError
+from agentlayer.gate import Gate, Policy
 from bench.check import Task, Verdict, check, load_tasks
 from bench.fixture_server import serve
+from bench.fixtures.mac.launch import fixture_app
+from bench.solutions import AGENT as SOLUTION_AGENT
+from bench.solutions import SOLUTIONS
 
 ARMS = Path(__file__).parent / "arms.toml"
 RESULTS = Path(__file__).parent / "results"
@@ -45,9 +52,11 @@ class Arm:
     tools: tuple[str, ...]
     only_kinds: tuple[str, ...] = ()
     hidden: tuple[str, ...] = ()
+    platforms: tuple[str, ...] = ("web", "mac")
 
     def applies(self, task: Task) -> bool:
-        return not self.only_kinds or task.kind in self.only_kinds
+        kind_ok = not self.only_kinds or task.kind in self.only_kinds
+        return kind_ok and task.platform in self.platforms
 
 
 @dataclass(frozen=True)
@@ -76,6 +85,7 @@ def load_arms(path: Path = ARMS) -> dict[str, Arm]:
             tuple(str(sys.executable) if p == "{python}" else str(p) for p in a["command"]),
             tuple(a["tools"]), tuple(a.get("only_kinds", ())),
             hidden=tuple(t for t in offered if t not in a["tools"]),
+            platforms=tuple(a.get("platforms", ("web", "mac"))),
         )
     return arms
 
@@ -143,8 +153,29 @@ def workspace() -> Iterator[Path]:
         yield Path(raw)
 
 
-def prompt_for(task: Task, host: str, resume: Path) -> str:
-    return task.prompt.format(url=f"http://{host}/{task.page}", resume=resume)
+@dataclass(frozen=True)
+class Fixture:
+    """Where a task starts, and how to read what the app ended up holding."""
+
+    target: str
+    resume: Path
+    recorded: Callable[[], Mapping[str, Any]]
+
+
+@contextmanager
+def fixture_for(task: Task, home: Path) -> Iterator[Fixture]:
+    resume = home / "resume.pdf"
+    resume.write_bytes(RESUME)
+    if task.platform == "mac":
+        with fixture_app(home / "mac-state.json") as app:
+            yield Fixture(app.target, resume, lambda: {"state": {"mac": app.state()}})
+        return
+    with serve() as (host, recorder):
+        yield Fixture(f"http://{host}/{task.page}", resume, recorder.snapshot)
+
+
+def prompt_for(task: Task, fixture: Fixture) -> str:
+    return task.prompt.format(url=fixture.target, target=fixture.target, resume=fixture.resume)
 
 
 def _stop_daemon(home: Path) -> None:
@@ -154,12 +185,10 @@ def _stop_daemon(home: Path) -> None:
 
 
 def run_once(task: Task, arm: Arm, model: str) -> dict[str, Any]:
-    with workspace() as home, serve() as (host, recorder):
-        resume = home / "resume.pdf"
-        resume.write_bytes(RESUME)
+    with workspace() as home, fixture_for(task, home) as fixture:
         config = home / "mcp.json"
         config.write_text(json.dumps(mcp_config(arm, home, task.commit)), encoding="utf-8")
-        command = claude_command(arm, config, prompt_for(task, host, resume), model)
+        command = claude_command(arm, config, prompt_for(task, fixture), model)
         env = {k: v for k, v in os.environ.items() if k not in _DROPPED_ENV}
         started = time.monotonic()
         try:
@@ -174,7 +203,7 @@ def run_once(task: Task, arm: Arm, model: str) -> dict[str, Any]:
             if arm.server == "agent-layer":
                 _stop_daemon(home)
         time.sleep(0.3)
-        verdict = check(task, recorder.snapshot(), usage.answer)
+        verdict = check(task, fixture.recorded(), usage.answer)
     return {
         "task": task.id, "arm": arm.id, "model": model, "ok": verdict.ok,
         "reasons": list(verdict.reasons), **asdict(usage), "at": time.time(),
@@ -183,55 +212,54 @@ def run_once(task: Task, arm: Arm, model: str) -> dict[str, Any]:
 
 # --- smoke: no model ------------------------------------------------------------------------
 
-async def _scripted(task: Task, host: str, resume: Path) -> tuple[str, dict[str, int]]:
-    """What a perfect agent would do through arm D, to prove each task can be passed."""
-    from agentlayer.gate import Policy
+@asynccontextmanager
+async def _engine_for(task: Task) -> AsyncIterator[Engine]:
+    """An in-process engine with the task's commit policy, as the arms run it."""
+    policy = Policy(task.commit)
+    if task.platform == "mac":
+        from agentlayer.backends.mac.backend import MacBackend
+
+        engine = Engine({"mac": MacBackend()}, gate=Gate(policy), adapters=AdapterRegistry(()))
+        try:
+            yield engine
+        finally:
+            await engine.stop()
+        return
     from tests.web_harness import engine_with_chrome
 
+    async with engine_with_chrome(policy) as engine:
+        yield engine
+
+
+async def _measured(task: Task, fixture: Fixture) -> tuple[str, dict[str, int]]:
+    """How big the first look is, then the scripted solution in a fresh engine."""
     sizes: dict[str, int] = {}
-    async with engine_with_chrome(Policy.ALLOW) as engine:
-        await engine.open("bench", f"http://{host}/{task.page}")
-        sizes["observe"] = len(await engine.observe("bench"))
+    async with _engine_for(task) as engine:
+        await engine.open(SOLUTION_AGENT, fixture.target)
+        sizes["observe"] = len(await engine.observe(SOLUTION_AGENT))
         if task.kind == "form":
-            sizes["form"] = len(await engine.form("bench"))
-        if task.id == "contact-send":
-            await engine.fill("bench", {"Topic": "Support",
-                                        "Message": "The export button does nothing."})
-            found = await engine.observe("bench", query="Send message", role="button")
-            ref = found.split("[", 1)[1].split("]", 1)[0]
-            await engine.act("bench", ref, "press")
-            return "done", sizes
-        if task.id == "application-fill":
-            values = {
-                "Resume/CV": str(resume), "First name": "Ada", "Last name": "Lovelace",
-                "Email": "ada@example.com", "Phone": "555 123 4567", "Country": "Taiwan",
-                "Degree": "Master of Science", "School": "Riverbend University",
-                "Will you require visa sponsorship?": "No",
-                "Are you at least 18 years old?": "Yes", "I agree to the privacy notice": "on",
-            }
-            report = await engine.fill("bench", values)
-            sizes["fill"] = len(report)
-            if "mismatch" in report:
-                await engine.fill("bench", {"First name": "Ada"})
-            return "done", sizes
-        if task.id == "orders-lookup":
-            found = await engine.observe("bench", query="#1043")
-            sizes["query"] = len(found)
-            return found.rsplit("|", 1)[-1].strip().strip('"'), sizes
-    raise ValueError(f"no scripted solution for {task.id}")
+            sizes["form"] = len(await engine.form(SOLUTION_AGENT))
+    solution = SOLUTIONS.get(task.id)
+    if solution is None:
+        raise ValueError(f"no scripted solution for {task.id}")
+    async with _engine_for(task) as engine:
+        answer = await solution(engine, SOLUTION_AGENT, fixture.target, fixture.resume)
+    return answer, sizes
 
 
 def smoke(tasks: Sequence[Task]) -> bool:
     passed = True
     for task in tasks:
-        with workspace() as home, serve() as (host, recorder):
-            resume = home / "resume.pdf"
-            resume.write_bytes(RESUME)
-            answer, sizes = asyncio.run(_scripted(task, host, resume))
+        with workspace() as home, fixture_for(task, home) as fixture:
+            try:
+                answer, sizes = asyncio.run(_measured(task, fixture))
+            except LayerError as exc:
+                answer, sizes = "", {}
+                print(f"     {task.id}: {exc.code} {exc.message}")
             time.sleep(0.3)
-            verdict: Verdict = check(task, recorder.snapshot(), answer)
+            verdict: Verdict = check(task, fixture.recorded(), answer)
         shown = ", ".join(f"{k} {v} chars" for k, v in sizes.items())
-        print(f"{'ok  ' if verdict.ok else 'FAIL'} {task.id}: {shown}")
+        print(f"{'ok  ' if verdict.ok else 'FAIL'} {task.id}: {shown}", flush=True)
         for reason in verdict.reasons:
             print(f"     {reason}")
         passed = passed and verdict.ok

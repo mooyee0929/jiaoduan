@@ -47,3 +47,100 @@ page = "orders.html"
 prompt = """Open {url}. What is the total of order #1043? Reply with only the amount,
 for example $12.34."""
 expect.answer = "$1,997.18"
+
+[[task]]
+id = "application-visa"
+kind = "form"
+page = "application.html"
+prompt = """Open {url} and fill in the job application with the details below. Do not submit it.
+Resume: {resume}
+First name: Ada. Last name: Lovelace. Email: ada@example.com. Phone: 555 123 4567.
+Country: Taiwan. Degree: Master of Science. School: Riverbend University.
+Needs visa sponsorship: yes, visa type H-1B. At least 18: yes. Agree to the privacy notice.
+When every field holds the right value, stop and say done."""
+expect.no_submissions = ["application"]
+
+[task.expect.state.application]
+first = "Ada"
+last = "Lovelace"
+email = "ada@example.com"
+phone = "(555) 123-4567"
+country = "Taiwan"
+degree = "Master of Science"
+school = "Riverbend University"
+sponsor = "Yes"
+visa = "H-1B"
+adult = "Yes"
+agree = true
+resume = "resume.pdf"
+
+[[task]]
+id = "orders-count"
+kind = "read"
+page = "orders.html"
+prompt = """Open {url}. How many of the orders shown have the status Refunded?
+Reply with only the number."""
+expect.number = 29
+
+[[task]]
+id = "doc-lookup"
+kind = "read"
+page = "policy.html"
+prompt = """Open {url}. How many days of written notice does either party need to give to end
+the agreement for convenience? Reply with only the number."""
+expect.number = 45
+
+[[task]]
+id = "checkout-wizard"
+kind = "form"
+page = "checkout.html"
+commit = "allow"
+prompt = """Open {url} and place an order with these details.
+Full name: Grace Hopper. City: Lyon, France. Postal code: 69002.
+Delivery speed: Express. Gift message: Happy birthday.
+Delivery instructions: Leave at the front desk."""
+
+[[task.expect.submissions.checkout]]
+name = "Grace Hopper"
+city = "Lyon, France"
+postal = "69002"
+speed = "Express"
+gift = "Happy birthday"
+instructions = "Leave at the front desk"
+
+[[task]]
+id = "settings-save"
+kind = "form"
+page = "settings.html"
+prompt = """Open {url}. Turn on two-factor sign-in, set the email digest to Weekly and the display
+name to Ada L., then save. Make sure the settings were really saved, then say done."""
+expect.submissions.settings = [{ twofactor = true, digest = "Weekly", display = "Ada L." }]
+
+# macOS: the Cocoa fixture app in bench/fixtures/mac, started fresh for each run. `{target}` is
+# what `open` takes to reach it.
+
+[[task]]
+id = "mac-fill"
+kind = "form"
+platform = "mac"
+page = "fixture_app"
+prompt = """Use the macOS app "Fixture Form": open it with the target {target}. Set Name to
+Ada Lovelace, turn on Subscribe to news, set Size to Large and the delivery method to Courier.
+Do not press Save. Say done when every control shows the right value."""
+
+[task.expect.state.mac]
+name = "Ada Lovelace"
+subscribe = true
+size = "Large"
+delivery = "Courier"
+saved = 0
+
+[[task]]
+id = "mac-save"
+kind = "form"
+platform = "mac"
+page = "fixture_app"
+commit = "allow"
+prompt = """Use the macOS app "Fixture Form": open it with the target {target}. Set Name to
+Grace Hopper and the delivery method to Pickup, then press Save once."""
+expect.state.mac = { name = "Grace Hopper", delivery = "Pickup", saved = 1 }
