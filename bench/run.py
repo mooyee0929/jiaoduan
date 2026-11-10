@@ -80,10 +80,10 @@ def load_arms(path: Path = ARMS) -> dict[str, Arm]:
     return arms
 
 
-def mcp_config(arm: Arm, home: Path) -> dict[str, Any]:
+def mcp_config(arm: Arm, home: Path, commit: str = "ask") -> dict[str, Any]:
     env = {
         "AGENTLAYER_HOME": str(home), "AGENTLAYER_PROFILE": str(home / "profile"),
-        "AGENTLAYER_COMMIT": "allow", "AGENTLAYER_MOCK_KEYCHAIN": "1",
+        "AGENTLAYER_COMMIT": commit, "AGENTLAYER_MOCK_KEYCHAIN": "1",
         "AGENTLAYER_AGENT": "bench",
     } if arm.server == "agent-layer" else {}
     return {"mcpServers": {arm.server: {
@@ -158,7 +158,7 @@ def run_once(task: Task, arm: Arm, model: str) -> dict[str, Any]:
         resume = home / "resume.pdf"
         resume.write_bytes(RESUME)
         config = home / "mcp.json"
-        config.write_text(json.dumps(mcp_config(arm, home)), encoding="utf-8")
+        config.write_text(json.dumps(mcp_config(arm, home, task.commit)), encoding="utf-8")
         command = claude_command(arm, config, prompt_for(task, host, resume), model)
         env = {k: v for k, v in os.environ.items() if k not in _DROPPED_ENV}
         started = time.monotonic()

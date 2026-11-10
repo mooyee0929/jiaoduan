@@ -61,6 +61,7 @@ JsonObject = dict[str, Any]
 WORLD = "agentlayer"
 BINDING = "agentlayerEvent"
 _INPUT_TIMEOUT = 5.0
+_CHOOSER_WAIT = 3.0
 _READ_ATTEMPTS = 4
 _READ_RETRY = 0.1
 _STABLE_ATTEMPTS = 12
@@ -159,6 +160,10 @@ HIT_JS = """function (x, y) {
 }"""
 
 LABEL_OF_JS = """function () { return (this.labels && this.labels[0]) || null; }"""
+
+IS_FILE_INPUT_JS = """function () {
+  return this.tagName === 'INPUT' && (this.type || '').toLowerCase() === 'file';
+}"""
 
 SELECT_ALL_JS = """function () {
   this.focus();
@@ -834,9 +839,30 @@ class WebBackend:
         if missing:
             raise LayerError(INVALID_ARGS, f"no such file: {missing[0]}")
         session = page.session_for(web.session_id)
+        files = [str(Path(p).resolve()) for p in paths]
+        kind = await self._call_on(session, web.backend_id, IS_FILE_INPUT_JS)
+        if kind["result"].get("value"):
+            await session.send(
+                "DOM.setFileInputFiles", {"files": files, "backendNodeId": web.backend_id}
+            )
+            return Delivery.DELIVERED
+        # Real pages hide the file input behind a button; press it and fill the chooser it
+        # opens. Choosers are intercepted, so no OS dialog ever appears.
+        page.chooser = None
+        page.chooser_event.clear()
+        await self._click(page, web, 1, "left")
+        try:
+            await asyncio.wait_for(page.chooser_event.wait(), _CHOOSER_WAIT)
+        except TimeoutError as exc:
+            raise LayerError(
+                NOT_ACTIONABLE, "pressing it opened no file chooser",
+                delivery=Delivery.DELIVERED,
+                hint="upload to the control that opens the file picker, or to the file input",
+            ) from exc
+        chooser: JsonObject = page.chooser or {}
         await session.send(
             "DOM.setFileInputFiles",
-            {"files": [str(Path(p).resolve()) for p in paths], "backendNodeId": web.backend_id},
+            {"files": files, "backendNodeId": int(chooser["backendNodeId"])},
         )
         return Delivery.DELIVERED
 

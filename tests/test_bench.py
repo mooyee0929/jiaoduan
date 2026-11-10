@@ -41,7 +41,9 @@ def test_commands_disable_built_in_tools_and_other_servers(tmp_path: Path) -> No
     assert "browser_snapshot" in vision.hidden and "browser_evaluate" in vision.hidden
     assert "--snapshot-mode=none" in vision.command
     env = mcp_config(arm, tmp_path)["mcpServers"]["agent-layer"]["env"]
-    assert env["AGENTLAYER_COMMIT"] == "allow"
+    assert env["AGENTLAYER_COMMIT"] == "ask"
+    tasks = {t.id: t.commit for t in load_tasks()}
+    assert tasks == {"contact-send": "allow", "application-fill": "ask", "orders-lookup": "ask"}
     assert env["AGENTLAYER_PROFILE"].startswith(str(tmp_path))
 
 

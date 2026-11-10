@@ -20,6 +20,7 @@ class Task:
     page: str
     prompt: str
     expect: Mapping[str, Any]
+    commit: str = "ask"
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,8 @@ class Verdict:
 def load_tasks(path: Path = TASKS) -> list[Task]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     return [
-        Task(str(t["id"]), str(t["kind"]), str(t["page"]), str(t["prompt"]), t["expect"])
+        Task(str(t["id"]), str(t["kind"]), str(t["page"]), str(t["prompt"]), t["expect"],
+             str(t.get("commit", "ask")))
         for t in data["task"]
     ]
 

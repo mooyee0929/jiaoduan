@@ -191,3 +191,51 @@ def test_a_script_written_value_is_not_mistaken_for_a_filled_field() -> None:
                 assert (await store(engine, surface))["last"] == "Lovelace"
 
     run(scenario())
+
+
+def ref_named(text: str, role: str, name: str) -> str:
+    for line in text.splitlines():
+        if line.lstrip().startswith(f'- {role} "{name}') and "[e" in line:
+            return line.split("[e", 1)[1].split("]", 1)[0].join(["e", ""])
+    raise AssertionError(f'{role} "{name}" not in\n{text}')
+
+
+def test_element_level_select_uses_the_widget_driver() -> None:
+    async def scenario() -> tuple[dict[str, Any], str]:
+        with serve() as (host, _):
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/application.html")
+                seen = await engine.observe("a", mode="full")
+                await engine.act("a", ref_named(seen, "combobox", "Country"), "select", "Taiwan")
+                await engine.act("a", ref_named(seen, "combobox", "Degree"), "select",
+                                 "Master of Science")
+                await engine.act("a", ref_named(seen, "button", "School"), "select",
+                                 "Riverbend University")
+                with pytest.raises(LayerError) as caught:
+                    await engine.act("a", ref_named(seen, "combobox", "Degree"), "select",
+                                     "Master")
+                assert caught.value.code == "AMBIGUOUS"
+                assert "Master of Business Administration" in caught.value.message
+                return await store(engine, opened.split()[0]), caught.value.message
+
+    state, _ = run(scenario())
+    assert state["country"] == "Taiwan"
+    assert state["degree"] == "Master of Science"
+    assert state["school"] == "Riverbend University"
+
+
+def test_upload_through_the_button_that_opens_the_file_chooser() -> None:
+    async def scenario() -> dict[str, Any]:
+        with tempfile.TemporaryDirectory() as tmp, serve() as (host, _):
+            resume = Path(tmp) / "resume.pdf"
+            resume.write_bytes(b"%PDF-1.4 test")
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/application.html")
+                seen = await engine.observe("a", mode="full")
+                result = await engine.act(
+                    "a", ref_named(seen, "button", "Attach"), "upload", str(resume)
+                )
+                assert "delivered" in result.splitlines()[0]
+                return await store(engine, opened.split()[0])
+
+    assert run(scenario())["resume"] == "resume.pdf"

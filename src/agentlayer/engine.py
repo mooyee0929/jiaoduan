@@ -15,18 +15,20 @@ from agentlayer.adapters.registry import AdapterRegistry
 from agentlayer.claims import Claims, SessionLocks
 from agentlayer.diff import Effect, diff
 from agentlayer.errors import (
+    AMBIGUOUS,
     BACKEND_UNAVAILABLE,
     INVALID_ARGS,
     NO_ACCESSIBLE_TREE,
     NO_SURFACE,
     NOT_ACTIONABLE,
+    NOT_FOUND,
     NOT_SUPPORTED,
     LayerError,
 )
 from agentlayer.expect import ExpectResult, Scene, check
 from agentlayer.forms.fill import FillLine, FormIds, render_fill, render_schema
 from agentlayer.forms.fill import fill as fill_form
-from agentlayer.forms.schema import DriverContext, Field, WriteStatus, collect
+from agentlayer.forms.schema import DriverContext, Field, FieldKind, WriteStatus, collect
 from agentlayer.gate import Gate, Policy, commit_reason
 from agentlayer.model import (
     Action,
@@ -51,6 +53,9 @@ MAX_WAIT = 60.0
 _URL_LIKE = re.compile(r"^[a-z][a-z0-9+.-]*:|^[\w-]+(\.[\w-]+)+(/|$)", re.IGNORECASE)
 _ACTIONS = {kind.value: kind for kind in ActionKind}
 _GOOD_WRITES = frozenset({WriteStatus.OK, WriteStatus.UNCHANGED})
+_CHOICE_KINDS = frozenset({
+    FieldKind.SELECT, FieldKind.COMBOBOX, FieldKind.LISTBOX, FieldKind.RADIO, FieldKind.BUTTONS,
+})
 
 
 @dataclass(frozen=True)
@@ -320,6 +325,10 @@ class Engine:
 
         if kind is ActionKind.TOGGLE and self._already(target, value):
             return await self._noop(agent, surface, target, before, kind, expect)
+        if kind is ActionKind.SELECT:
+            return await self._select(
+                agent, surface, target, before, value or "", expect, settle_budget
+            )
 
         await self._check_commit(agent, surface, entry, target, kind, gate_token, force_commit)
         mark = backend.begin(surface)
@@ -334,6 +343,63 @@ class Engine:
         view = self._replaced_view(after) if effect.page_replaced else None
         text = render.action_text(
             kind.value, target, delivery, evidence, effect, expects, warnings, view
+        )
+        return text, delivery, evidence, info.location
+
+    async def _select(
+        self,
+        agent: str,
+        surface: SurfaceId,
+        target: Node,
+        before: list[Node],
+        value: str,
+        expect: Sequence[Mapping[str, object]] | Mapping[str, object] | None,
+        settle_budget: float,
+    ) -> tuple[str, Delivery, Evidence, str]:
+        """Choosing an option is a widget's job: the same driver `fill` would use does it."""
+        backend = self.backend_for(surface)
+        ctx = self.driver_context(agent, surface)
+        fields = await collect(ctx, None, with_values=False)
+        field = next(
+            (f for f in fields if f.handle == target.handle
+             or any(m.handle == target.handle for m in f.members)),
+            None,
+        )
+        if field is None or field.kind not in _CHOICE_KINDS:
+            raise LayerError(
+                NOT_SUPPORTED, f"{render.describe_node(target)} is not a field with options",
+                hint="use set for text; for other menus press the control, then the option",
+            )
+        mark = backend.begin(surface)
+        outcome = await field.driver.write(ctx, field, value)
+        if outcome.status in {WriteStatus.AMBIGUOUS, WriteStatus.NOT_FOUND}:
+            choices = " | ".join(outcome.candidates) or "none matched"
+            raise LayerError(
+                AMBIGUOUS if outcome.status is WriteStatus.AMBIGUOUS else NOT_FOUND,
+                f"{value!r} is not one option of {render.describe_node(target)}: {choices}",
+                delivery=Delivery.NOT_DELIVERED, hint="call form to see every option",
+            )
+        settle = await backend.settle(surface, mark, settle_budget)
+        after, sync = await self.read_surface(agent, surface)
+        info = await backend.describe(surface)
+        effect = diff(before, after, sync, settle)
+        expects = self._expects(after, info, settle, target.ref, expect)
+        good = outcome.status in _GOOD_WRITES
+        warnings = [] if good else [
+            f"{outcome.status.value}: shows {outcome.got!r}"
+            + (f" ({outcome.note})" if outcome.note else "")
+        ]
+        if outcome.status is WriteStatus.UNCHANGED:
+            warnings.append("already chosen; nothing was sent")
+        delivery = (
+            Delivery.NOT_DELIVERED if outcome.status is WriteStatus.UNCHANGED
+            else Delivery.DELIVERED
+        )
+        evidence = outcome.evidence if good else Evidence.NONE
+        if any(not e.ok for e in expects):
+            evidence = Evidence.NONE
+        text = render.action_text(
+            "select", target, delivery, evidence, effect, expects, warnings
         )
         return text, delivery, evidence, info.location
 

@@ -1,11 +1,16 @@
 # Benchmark tasks. `{url}` is the fixture page on a fresh local server for each run and
 # `{resume}` a throwaway PDF. Success is decided from what the page posted to the server
 # (never visible to the agent) or from the agent's final answer.
+#
+# `commit` is the agent-layer arms' gate policy. It defaults to `ask`, as shipped: nobody is
+# there to approve, so an unrequested submit is held. A task whose job is to submit runs with
+# `allow`, standing in for the person approving that one send. Playwright arms have no gate.
 
 [[task]]
 id = "contact-send"
 kind = "form"
 page = "contact.html"
+commit = "allow"
 prompt = """Open {url}. Send a message with the topic Support that says exactly:
 The export button does nothing."""
 expect.submissions.contact = [{ topic = "Support", message = "The export button does nothing." }]
