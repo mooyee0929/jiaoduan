@@ -72,6 +72,7 @@ def test_each_worker_gets_its_own_agent_name_and_only_layer_tools(tmp_path: Path
     command = command_for(spec, tmp_path / "c.json", "do it")
     assert command[command.index("--allowedTools") + 1] == "mcp__agent-layer"
     assert "--strict-mcp-config" in command
+    assert command[command.index("--tools") + 1] == ""
     assert command[command.index("--model") + 1] == "claude-sonnet-5-5"
 
 

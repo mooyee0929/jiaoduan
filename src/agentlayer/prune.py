@@ -184,6 +184,13 @@ def context(nodes: Sequence[Node], index: int) -> tuple[Node, str] | None:
             end = back + 1
             while end < len(nodes) and nodes[end].depth > candidate.depth:
                 end += 1
+            if candidate.role is Role.ROW:
+                cells = _cells(nodes, back, end)
+                headers = _header_row(nodes, back)
+                if headers and len(headers) == len(cells):
+                    pairs = zip(headers, cells, strict=True)
+                    labelled = [f"{h}: {c}" if h else c for h, c in pairs]
+                    return candidate, " | ".join(labelled)[:CONTEXT_CHARS]
             pieces: list[str] = []
             for node in nodes[back + 1:end]:
                 piece = node.value if node.value else node.name
@@ -191,6 +198,31 @@ def context(nodes: Sequence[Node], index: int) -> tuple[Node, str] | None:
                     pieces.append(piece)
             return candidate, " | ".join(pieces)[:CONTEXT_CHARS]
     return None
+
+
+def _cells(nodes: Sequence[Node], row: int, end: int) -> list[str]:
+    depth = nodes[row].depth + 1
+    return [
+        n.value or n.name for n in nodes[row + 1:end]
+        if n.depth == depth and n.role in {Role.CELL, Role.COLUMNHEADER}
+    ]
+
+
+def _header_row(nodes: Sequence[Node], row: int) -> list[str]:
+    """Column names from the nearest earlier row in the same table made of header cells."""
+    depth = nodes[row].depth
+    for back in range(row - 1, -1, -1):
+        node = nodes[back]
+        if node.depth < depth:
+            return []
+        if node.depth == depth and node.role is Role.ROW:
+            end = back + 1
+            while end < len(nodes) and nodes[end].depth > depth:
+                end += 1
+            children = [n for n in nodes[back + 1:end] if n.depth == depth + 1]
+            if children and all(n.role is Role.COLUMNHEADER for n in children):
+                return [n.name for n in children]
+    return []
 
 
 def search_text(

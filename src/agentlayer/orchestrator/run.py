@@ -71,9 +71,10 @@ def prompt_for(spec: AgentSpec, inputs: Sequence[Outcome]) -> str:
 
 
 def command_for(spec: AgentSpec, config: Path, prompt: str, claude: str = "claude") -> list[str]:
+    # No built-in tools at all: a worker with a shell could approve its own gates.
     command = [
         claude, "-p", prompt, "--mcp-config", str(config), "--strict-mcp-config",
-        "--allowedTools", f"mcp__{SERVER}", "--output-format", "json",
+        "--tools", "", "--allowedTools", f"mcp__{SERVER}", "--output-format", "json",
     ]
     if spec.model:
         command += ["--model", spec.model]

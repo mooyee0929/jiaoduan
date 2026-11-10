@@ -148,6 +148,14 @@ def test_a_matched_cell_comes_with_the_rest_of_its_row() -> None:
     assert total == 1
     assert lines == ['- cell "#1043"', '  in row: "#1043 | Morgan | $1,997.18"']
 
+    header = RawNode(None, Role.ROW, "row", children=[
+        RawNode(None, Role.COLUMNHEADER, "columnheader", name) for name in ("Order", "Customer",
+                                                                           "Total")
+    ])
+    table.children.insert(0, header)
+    lines, _ = prune.search_text(prune.flatten([table]), "#1043")
+    assert lines[1] == '  in row: "Order: #1043 | Customer: Morgan | Total: $1,997.18"'
+
 
 def test_search_is_flat_and_filters_role() -> None:
     nodes = prune.flatten([form(1, "F", button(2, "Save draft"), textbox(3, "Save as"))])
