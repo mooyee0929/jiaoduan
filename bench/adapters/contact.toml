@@ -1,0 +1,25 @@
+# Example adapter for the contact fixture. Data only: every step goes through the same
+# observe/fill/act calls an agent would make, and the send step waits for a person's approval.
+
+[adapter]
+id = "fixture/contact"
+version = 1
+match = { url = "http://127.0.0.1:*/contact.html*" }
+concurrency = { key = "origin", max = 1 }
+
+[[tool]]
+name = "send_contact_message"
+description = "Send a message through the contact form"
+input.topic = { type = "string", enum = ["Sales", "Support"] }
+input.message = { type = "string", description = "the message body" }
+
+[[tool.step]]
+fill = { Topic = "{topic}", Message = "{message}" }
+
+[[tool.step]]
+press = { role = "button", name = "Send message" }
+commit = true
+
+[[tool.step]]
+wait = { text_visible = "Thanks, message sent" }
+timeout = 5

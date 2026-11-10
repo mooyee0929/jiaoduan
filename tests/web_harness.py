@@ -6,23 +6,30 @@ import asyncio
 import http.server
 import tempfile
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Coroutine, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
+from typing import Any, TypeVar
 
+from agentlayer.adapters.registry import AdapterRegistry
 from agentlayer.backends.web.backend import WebBackend, WebOptions
 from agentlayer.engine import Engine
 from agentlayer.gate import Gate, Policy
 
 PAGES = Path(__file__).parent / "pages"
+T = TypeVar("T")
 
 
 @asynccontextmanager
-async def engine_with_chrome(policy: Policy = Policy.ASK) -> AsyncIterator[Engine]:
+async def engine_with_chrome(
+    policy: Policy = Policy.ASK, adapters: tuple[Path, ...] = ()
+) -> AsyncIterator[Engine]:
     with tempfile.TemporaryDirectory(prefix="al-test-") as tmp:
         backend = WebBackend(WebOptions(Path(tmp), headless=True, mock_keychain=True))
         await backend.start()
-        engine = Engine({"web": backend}, gate=Gate(policy))
+        engine = Engine(
+            {"web": backend}, gate=Gate(policy), adapters=AdapterRegistry(adapters)
+        )
         try:
             yield engine
         finally:
@@ -59,5 +66,5 @@ def pages_server() -> Iterator[str]:
         thread.join()
 
 
-def run(coroutine: object) -> None:
-    asyncio.run(coroutine)  # type: ignore[arg-type]
+def run(coroutine: Coroutine[Any, Any, T]) -> T:
+    return asyncio.run(coroutine)

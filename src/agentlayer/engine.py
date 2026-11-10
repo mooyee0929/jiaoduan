@@ -190,9 +190,10 @@ class Engine:
             )
         header = f'{chosen} {render.quote(info.title, 80)} {info.location[:160]}'
         if query:
-            hits, total = prune.search(nodes, query, role)
-            shown = f"{len(hits)} of {total} matches" if total > len(hits) else f"{total} matches"
-            return "\n".join(filter(None, [f"{header} | {shown}", render.nodes_text(hits)]))
+            lines, total = prune.search_text(nodes, query, role)
+            limit = prune.SEARCH_LIMIT
+            shown = f"{limit} of {total} matches" if total > limit else f"{total} matches"
+            return "\n".join([f"{header} | {shown}", *lines])
         scoped = prune.subtree(nodes, self.state(agent).refs.lookup(root).ref) if root else nodes
         try:
             wanted = prune.Mode(mode)

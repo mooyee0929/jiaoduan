@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from enum import StrEnum
 
+from agentlayer import render
 from agentlayer.errors import INVALID_ARGS, LayerError
 from agentlayer.model import SCOPE_DEPTH, SCOPE_ROLES, Locator, Node, RawNode, Ref, Role, State
 
@@ -14,8 +15,9 @@ SKELETON_DEPTH = 3
 SEARCH_LIMIT = 30
 
 _ALWAYS_KEPT = frozenset({Role.WINDOW, Role.DIALOG, Role.FORM, Role.TABLE, Role.DOCUMENT})
+# Unnamed rows stay: without them a table flattens into cells with no row boundaries.
 _INVISIBLE_UNNAMED = frozenset({Role.OTHER, Role.GROUP, Role.IMAGE, Role.TEXT, Role.LIST,
-                                Role.LISTITEM, Role.ROW, Role.CELL, Role.FRAME, Role.REGION,
+                                Role.LISTITEM, Role.CELL, Role.FRAME, Role.REGION,
                                 Role.MAIN, Role.NAVIGATION})
 _SKELETON_ALWAYS = frozenset({Role.HEADING, Role.DIALOG, Role.ALERT, Role.FORM})
 
@@ -163,6 +165,59 @@ def search(
         and needle in f"{n.name} {n.value or ''}".casefold()
     ]
     return hits[:limit], len(hits)
+
+
+_CONTEXT_ROLES = frozenset({Role.ROW, Role.LISTITEM, Role.TREEITEM})
+CONTEXT_CHARS = 240
+
+
+def context(nodes: Sequence[Node], index: int) -> tuple[Node, str] | None:
+    """The row or list item a match sits in, with that item's text, so a cell found by search
+    comes with the rest of its row instead of needing another round trip."""
+    depth = nodes[index].depth
+    for back in range(index - 1, -1, -1):
+        candidate = nodes[back]
+        if candidate.depth >= depth:
+            continue
+        depth = candidate.depth
+        if candidate.role in _CONTEXT_ROLES:
+            end = back + 1
+            while end < len(nodes) and nodes[end].depth > candidate.depth:
+                end += 1
+            pieces: list[str] = []
+            for node in nodes[back + 1:end]:
+                piece = node.value if node.value else node.name
+                if piece and piece not in pieces:
+                    pieces.append(piece)
+            return candidate, " | ".join(pieces)[:CONTEXT_CHARS]
+    return None
+
+
+def search_text(
+    nodes: Sequence[Node], query: str, role: str | None = None, limit: int = SEARCH_LIMIT
+) -> tuple[list[str], int]:
+    """Rendered matches; one without a ref is followed by the row it belongs to."""
+    needle = query.strip().casefold()
+    wanted = role.strip().casefold() if role else None
+    lines: list[str] = []
+    total = 0
+    seen_context: set[int] = set()
+    for index, node in enumerate(nodes):
+        if wanted is not None and node.role.value != wanted:
+            continue
+        if needle not in f"{node.name} {node.value or ''}".casefold():
+            continue
+        total += 1
+        if total > limit:
+            continue
+        lines.append(render.node_line(node, 0))
+        found = None if node.ref else context(nodes, index)
+        if found is not None and id(found[0]) not in seen_context:
+            seen_context.add(id(found[0]))
+            owner, text = found
+            ref = f" [{owner.ref}]" if owner.ref else ""
+            lines.append(f"  in {owner.role.value}{ref}: {render.quote(text, CONTEXT_CHARS)}")
+    return lines, total
 
 
 def text_of(nodes: Sequence[Node], limit: int = 8000) -> str:

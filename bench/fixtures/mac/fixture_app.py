@@ -23,7 +23,10 @@ ACCESSORY = 1
 OFF_SCREEN = (-4000.0, -4000.0)
 
 
-def _label(text: str, frame: tuple[float, float, float, float]) -> Any:
+Frame = tuple[tuple[float, float], tuple[float, float]]
+
+
+def _label(text: str, frame: Frame) -> Any:
     field = AppKit.NSTextField.labelWithString_(text)
     field.setFrame_(frame)
     return field

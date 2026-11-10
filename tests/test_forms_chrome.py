@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from bench.fixture_server import serve
 
 from agentlayer.engine import Engine
 from agentlayer.errors import LayerError
 from agentlayer.model import SurfaceId
+from bench.fixture_server import serve
 from tests.web_harness import engine_with_chrome, run
 
 pytestmark = pytest.mark.chrome

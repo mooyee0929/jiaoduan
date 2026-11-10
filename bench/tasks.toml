@@ -1,0 +1,44 @@
+# Benchmark tasks. `{url}` is the fixture page on a fresh local server for each run and
+# `{resume}` a throwaway PDF. Success is decided from what the page posted to the server
+# (never visible to the agent) or from the agent's final answer.
+
+[[task]]
+id = "contact-send"
+kind = "form"
+page = "contact.html"
+prompt = """Open {url}. Send a message with the topic Support that says exactly:
+The export button does nothing."""
+expect.submissions.contact = [{ topic = "Support", message = "The export button does nothing." }]
+
+[[task]]
+id = "application-fill"
+kind = "form"
+page = "application.html"
+prompt = """Open {url} and fill in the job application with the details below. Do not submit it.
+Resume: {resume}
+First name: Ada. Last name: Lovelace. Email: ada@example.com. Phone: 555 123 4567.
+Country: Taiwan. Degree: Master of Science. School: Riverbend University.
+Needs visa sponsorship: no. At least 18: yes. Agree to the privacy notice.
+When every field holds the right value, stop and say done."""
+expect.no_submissions = ["application"]
+
+[task.expect.state.application]
+first = "Ada"
+last = "Lovelace"
+email = "ada@example.com"
+phone = "(555) 123-4567"
+country = "Taiwan"
+degree = "Master of Science"
+school = "Riverbend University"
+sponsor = "No"
+adult = "Yes"
+agree = true
+resume = "resume.pdf"
+
+[[task]]
+id = "orders-lookup"
+kind = "read"
+page = "orders.html"
+prompt = """Open {url}. What is the total of order #1043? Reply with only the amount,
+for example $12.34."""
+expect.answer = "$1,997.18"

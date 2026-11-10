@@ -97,9 +97,16 @@ def test_observe_reads_native_controls(app: Fixture) -> None:
     assert 'radio "Courier"' in text
 
 
-def test_fill_reaches_the_app_model_without_moving_focus_or_pointer(app: Fixture) -> None:
-    front, where = frontmost(), pointer()
+def seconds_since_a_person_acted() -> float:
+    """Hardware input only: events this layer posts to an app's pid are not counted."""
+    import Quartz
 
+    return float(Quartz.CGEventSourceSecondsSinceLastEventType(
+        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType
+    ))
+
+
+def fill_everything(app: Fixture) -> str:
     async def scenario() -> str:
         layer = engine()
         try:
@@ -113,14 +120,27 @@ def test_fill_reaches_the_app_model_without_moving_focus_or_pointer(app: Fixture
         finally:
             await layer.stop()
 
-    report = run(scenario())
+    result: str = run(scenario())
+    return result
+
+
+def test_fill_reaches_the_app_model(app: Fixture) -> None:
+    report = fill_everything(app)
     assert report.startswith("fill: 4/4 ok"), report
     assert app.state() == {
         "name": "Ada Lovelace", "subscribe": True, "size": "Large", "delivery": "Courier",
         "saved": 0,
     }
-    assert frontmost() == front
-    assert pointer() == where
+
+
+def test_fill_leaves_the_frontmost_app_and_pointer_alone(app: Fixture) -> None:
+    front, where, started = frontmost(), pointer(), time.monotonic()
+    fill_everything(app)
+    after_front, after_pointer = frontmost(), pointer()
+    if seconds_since_a_person_acted() < time.monotonic() - started:
+        pytest.skip("someone used the keyboard or mouse during the test; cannot attribute moves")
+    assert after_front == front, f"frontmost app changed: {front} -> {after_front}"
+    assert after_pointer == where, f"pointer moved: {where} -> {after_pointer}"
 
 
 def test_an_unknown_menu_choice_is_reported_and_the_menu_closed(app: Fixture) -> None:

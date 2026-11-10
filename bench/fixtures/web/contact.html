@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- A plain contact form for adapter tests. With ?v=2 the send button is renamed, which is
+     how a site redesign breaks a recorded adapter. -->
+<meta charset="utf-8">
+<title>Contact us</title>
+<main>
+  <h1>Contact us</h1>
+  <form id="contact" aria-label="Contact">
+    <label>Topic
+      <select id="topic">
+        <option value="">Choose...</option>
+        <option>Sales</option>
+        <option>Support</option>
+      </select>
+    </label>
+    <label>Message <textarea id="message" rows="4"></textarea></label>
+    <button type="submit" id="send">Send message</button>
+  </form>
+  <p role="status" id="status"></p>
+</main>
+<script>
+  if (new URLSearchParams(location.search).get('v') === '2') {
+    document.getElementById('send').textContent = 'Submit';
+  }
+  document.getElementById('contact').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const store = {
+      topic: document.getElementById('topic').value,
+      message: document.getElementById('message').value,
+    };
+    fetch('/api/submit', {method: 'POST', body: JSON.stringify({page: 'contact', store})})
+      .then(() => { document.getElementById('status').textContent = 'Thanks, message sent'; })
+      .catch((error) => { document.getElementById('status').textContent = `Failed: ${error}`; });
+  });
+</script>

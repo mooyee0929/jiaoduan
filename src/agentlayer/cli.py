@@ -6,8 +6,8 @@ import argparse
 import asyncio
 import json
 import sys
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Any, TextIO
 
 from agentlayer.client import Client
 from agentlayer.errors import LayerError
@@ -108,6 +108,31 @@ def _json(text: str | None) -> Any:
     return None if text is None else json.loads(text)
 
 
+def _open_tty() -> TextIO:
+    return open("/dev/tty", "r+", encoding="utf-8")  # noqa: SIM115
+
+
+def confirm_at_terminal(question: str, opener: Callable[[], TextIO] = _open_tty) -> None:
+    """Ask on the controlling terminal, not stdin, so a command run by an agent cannot answer.
+
+    An agent's shell tool has no controlling terminal. This raises the bar; it is not a wall,
+    since any process running as the same user can still reach the daemon's socket.
+    """
+    try:
+        terminal = opener()
+    except OSError as exc:
+        raise LayerError(
+            "PERMISSION_DENIED", "approving a commit needs a person at a terminal",
+            hint="run `agentlayer gate approve` in your own terminal window",
+        ) from exc
+    with terminal:
+        terminal.write(f"{question} [y/N] ")
+        terminal.flush()
+        answer = terminal.readline().strip().lower()
+    if answer not in {"y", "yes"}:
+        raise LayerError("COMMIT_DENIED", "not approved")
+
+
 async def _dispatch(options: argparse.Namespace) -> str:
     command = options.command
     role = "operator" if command in {"gate", "daemon"} else "agent"
@@ -156,6 +181,15 @@ async def _dispatch(options: argparse.Namespace) -> str:
         if command == "gate":
             if options.gate_command == "list":
                 return await client.call("gate_list")
+            if options.gate_command == "approve":
+                pending = await client.call("gate_list")
+                line = next(
+                    (row for row in pending.splitlines() if row.split(" ", 1)[0] == options.id),
+                    None,
+                )
+                if line is None:
+                    raise LayerError("NOT_FOUND", f"no pending gate {options.id}")
+                confirm_at_terminal(f"approve {line}?")
             return await client.call(f"gate_{options.gate_command}", id=options.id)
         if command == "daemon":
             return await client.call(

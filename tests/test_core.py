@@ -135,6 +135,20 @@ def test_auto_picks_skeleton_only_past_the_budget() -> None:
     assert prune.select(nodes, prune.Mode.AUTO, 3)[1] is prune.Mode.SKELETON
 
 
+def test_a_matched_cell_comes_with_the_rest_of_its_row() -> None:
+    def row(number: int, *cells: str) -> RawNode:
+        return RawNode(None, Role.ROW, "row", children=[
+            RawNode(None, Role.CELL, "cell", value, children=[text(value)]) for value in cells
+        ])
+
+    table = RawNode(10, Role.TABLE, "table", "Orders", children=[
+        row(1, "#1042", "Avery", "$10.00"), row(2, "#1043", "Morgan", "$1,997.18"),
+    ])
+    lines, total = prune.search_text(prune.flatten([table]), "#1043")
+    assert total == 1
+    assert lines == ['- cell "#1043"', '  in row: "#1043 | Morgan | $1,997.18"']
+
+
 def test_search_is_flat_and_filters_role() -> None:
     nodes = prune.flatten([form(1, "F", button(2, "Save draft"), textbox(3, "Save as"))])
     hits, total = prune.search(nodes, "save", role="button")
