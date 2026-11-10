@@ -113,7 +113,8 @@ id = "settings-save"
 kind = "form"
 page = "settings.html"
 prompt = """Open {url}. Turn on two-factor sign-in, set the email digest to Weekly and the display
-name to Ada L., then save. Make sure the settings were really saved, then say done."""
+name to Ada L., then save. Make sure the settings were really saved; if a save did not stick,
+enter them again and save again. Then say done."""
 expect.saved.settings = { twofactor = true, digest = "Weekly", display = "Ada L." }
 
 # macOS: the Cocoa fixture app in bench/fixtures/mac, started fresh for each run. `{target}` is
