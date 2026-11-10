@@ -240,7 +240,53 @@ uv run python -m bench.report bench/results/*.jsonl
 ```
 
 Reports give success rates with Wilson intervals, and token counts with bootstrap intervals.
-Comparative numbers will be published here once the full run is done.
+
+### Results (2026-11-09)
+
+Setup:
+
+- Model: `claude-sonnet-5-5`, Playwright MCP 0.0.83, Chrome 157, 3 runs per cell.
+- Input tokens include cached tokens, so the `$` column, which prices them, is the fairer cost.
+- Raw records are in [`bench/published/2026-11-09.jsonl`](bench/published/2026-11-09.jsonl).
+
+| task | arm | success (95% CI) | input tokens | vs B | tool calls | s | $ |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| application-fill | A | 1/3 (6%-79%) | 450,518 | -49% | 88.7 | 63 | 0.249 |
+| application-fill | B | 2/3 (21%-94%) | 877,888 |  | 104.7 | 117 | 0.320 |
+| application-fill | C | 3/3 (44%-100%) | 55,477 | -94% | 16.3 | 22 | 0.054 |
+| application-fill | D | 3/3 (44%-100%) | 38,147 | -96% | 10.0 | 17 | 0.038 |
+| contact-send | A | 0/3 (0%-56%) | 126,094 | +211% | 38.3 | 32 | 0.111 |
+| contact-send | B | 3/3 (44%-100%) | 40,552 |  | 5.7 | 13 | 0.029 |
+| contact-send | C | 3/3 (44%-100%) | 22,862 | -44% | 4.0 | 9 | 0.023 |
+| contact-send | D | 3/3 (44%-100%) | 24,147 | -40% | 3.3 | 10 | 0.023 |
+| orders-lookup | A | 3/3 (44%-100%) | 34,976 | +39% | 5.0 | 10 | 0.040 |
+| orders-lookup | B | 3/3 (44%-100%) | 25,087 |  | 3.0 | 8 | 0.017 |
+| orders-lookup | C | 3/3 (44%-100%) | 20,729 | -17% | 2.0 | 7 | 0.024 |
+
+What this does and does not show:
+
+- **The gap is on the hard form.** Snapshots (B) needed 105 tool calls and $0.32 per
+  application. The traps include a late autofill, a virtual list and a re-render on upload.
+  This layer needed 10-16 calls and $0.04-0.05, and every one of its runs left the right
+  values in the page's own state.
+- **Easy pages are close.** Contact form and table lookup differ by a few calls. On the lookup,
+  C used fewer tokens but cost more than B.
+- **Screenshots (A) lost the most.** Lacking feedback that a click had worked, it sent the
+  contact form twice in two of three runs.
+- **Three runs per cell is not much.** The intervals are wide, and success rates overlap
+  everywhere except the application form.
+- **We wrote the fixtures.** They imitate failure patterns, not a real site, and a layer can be
+  tuned to its own tests. The first full run is how that showed: it exposed three bugs in this
+  layer.
+  - `select` was missing from the MCP tool.
+  - Upload did not work through the button that opens the file picker.
+  - `set` on a native dropdown did nothing.
+
+  C failed the application all three times, and twice sent it with Enter. The C and D rows
+  above are after those fixes. A and B are from the first run, whose harness and tasks were
+  otherwise identical.
+- **The gate policy differs by arm.** This layer's arms run with its shipped default, `ask`;
+  Playwright has no gate. Only the contact task, whose job is to submit, runs with `allow`.
 
 ## Development
 
