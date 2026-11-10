@@ -1,0 +1,11 @@
+<!doctype html>
+<title>Inner</title>
+<label>Inner field <input id="field"></label>
+<button onclick="document.getElementById('out').textContent='inner clicked'">Inner button</button>
+<p id="out"></p>
+<div id="host"></div>
+<script>
+  const root = document.getElementById('host').attachShadow({mode: 'open'});
+  root.innerHTML = '<button id="deep">Shadow button</button><p id="o2"></p>';
+  root.getElementById('deep').onclick = () => { root.getElementById('o2').textContent = 'shadow clicked'; };
+</script>

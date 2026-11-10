@@ -1,0 +1,9 @@
+<!doctype html>
+<title>Frames</title>
+<h1>Outer</h1>
+<iframe id="same" title="same frame" src="/inner.html" width="400" height="160"></iframe>
+<iframe id="cross" title="cross frame" width="400" height="160"></iframe>
+<script>
+  const port = location.port;
+  document.getElementById('cross').src = 'http://localhost:' + port + '/inner.html';
+</script>

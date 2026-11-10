@@ -1,0 +1,38 @@
+<!doctype html>
+<title>Basic</title>
+<main>
+  <h1>Contact</h1>
+  <form aria-label="Contact" onsubmit="event.preventDefault(); done('submitted')">
+    <label>Name <input id="name"></label>
+    <label>Secret <input id="secret" type="password"></label>
+    <label><input id="agree" type="checkbox"> Agree</label>
+    <button type="button" onclick="save()">Save draft</button>
+    <button type="button" onclick="saveFail()">Save failing</button>
+    <button type="submit">Submit</button>
+  </form>
+  <button id="adder" onclick="addRow()">Add row</button>
+  <button id="covered" style="position:relative">Covered</button>
+  <div id="overlay" hidden style="position:fixed;inset:0;background:#0003"></div>
+  <button id="cover" onclick="document.getElementById('overlay').hidden=false">Show overlay</button>
+  <div id="clicky" style="cursor:pointer" onclick="done('div clicked')">Plain div target</div>
+  <ul id="rows"></ul>
+  <p id="out" role="status"></p>
+  <a href="/second.html">Go to second</a>
+</main>
+<script>
+  function done(text) { document.getElementById('out').textContent = text; }
+  let count = 0;
+  function addRow() {
+    const li = document.createElement('li');
+    li.textContent = 'row ' + (++count);
+    document.getElementById('rows').appendChild(li);
+  }
+  async function save() {
+    const r = await fetch('/api/save', {method: 'POST', body: 'x'});
+    done('saved ' + r.status);
+  }
+  async function saveFail() {
+    const r = await fetch('/api/fail', {method: 'POST', body: 'x'});
+    done('failed ' + r.status);
+  }
+</script>
