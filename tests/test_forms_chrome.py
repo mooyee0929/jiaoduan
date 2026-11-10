@@ -255,3 +255,50 @@ def test_set_on_a_dropdown_that_takes_no_text_chooses_the_option() -> None:
     result, state = run(scenario())
     assert result.startswith('select combobox "Country"'), result
     assert state["country"] == "Japan"
+
+
+def test_remote_suggestions_that_only_nearly_match_are_reported_not_picked() -> None:
+    async def scenario() -> tuple[str, dict[str, Any]]:
+        with serve() as (host, _):
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/checkout.html")
+                report = await engine.fill("a", {"City": "Lyon"})
+                return report, await store(engine, opened.split()[0])
+
+    report, state = run(scenario())
+    line = next(line for line in report.splitlines() if '"City"' in line)
+    assert "ambiguous" in line and "Lyon, France" in line, report
+    assert not state.get("city")
+
+
+def test_text_typed_into_an_autocomplete_is_not_taken_for_a_choice() -> None:
+    async def scenario() -> tuple[str, dict[str, Any]]:
+        with serve() as (host, _):
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/checkout.html")
+                seen = await engine.observe("a", mode="full")
+                await engine.act("a", ref_named(seen, "combobox", "City"), "set", "Lyon, France")
+                await engine.key("a", "Escape")
+                report = await engine.fill("a", {"City": "Lyon, France"})
+                return report, await store(engine, opened.split()[0])
+
+    report, state = run(scenario())
+    assert '"City" ok "Lyon, France"' in report, report
+    assert state["city"] == "Lyon, France"
+
+
+def test_a_cross_origin_frame_in_a_hidden_step_stays_out_of_the_tree() -> None:
+    async def scenario() -> tuple[str, str]:
+        with serve() as (host, _):
+            async with engine_with_chrome() as engine:
+                first = await engine.open("a", f"http://{host}/checkout.html")
+                await engine.fill("a", {
+                    "Full name": "Grace Hopper", "City": "Lyon, France", "Postal code": "69002",
+                })
+                found = await engine.observe("a", query="Next", role="button")
+                await engine.act("a", found.split("[", 1)[1].split("]", 1)[0], "press")
+                return first, await engine.observe("a", mode="full")
+
+    first, second = run(scenario())
+    assert "Delivery notes" not in first and "Delivery instructions" not in first, first
+    assert 'textbox "Delivery instructions"' in second, second

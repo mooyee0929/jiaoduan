@@ -385,12 +385,21 @@ def _visible_options(nodes: Sequence[Node]) -> list[Node]:
 
 
 async def _wait_for_options(ctx: DriverContext, known: set[Handle]) -> list[Node]:
-    """Options that appeared since ``known`` was taken: older ones belong to other widgets."""
+    """Options that appeared since ``known`` was taken: older ones belong to other widgets.
+
+    Waits until the list stops changing: remote suggestions often arrive in stages, first
+    from an earlier query or a cache, then for what was typed.
+    """
     deadline = asyncio.get_running_loop().time() + _OPTION_WAIT
+    previous: tuple[str, ...] | None = None
     while True:
         fresh = [n for n in _visible_options(await ctx.nodes()) if n.handle not in known]
-        if fresh or asyncio.get_running_loop().time() >= deadline:
+        names = tuple(n.name for n in fresh)
+        if fresh and names == previous:
             return fresh
+        if asyncio.get_running_loop().time() >= deadline:
+            return fresh
+        previous = names if fresh else None
         await asyncio.sleep(_OPTION_POLL)
 
 
@@ -434,9 +443,11 @@ class ComboboxDriver:
         return []
 
     async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
-        current = await self.read(ctx, field)
-        if same_value(current, value):
-            return WriteOutcome(WriteStatus.UNCHANGED, current, Evidence.DRIVER)
+        facts = await _call(ctx, field.handle, COMBOBOX_READ_JS)
+        if same_value(str(facts["text"]), value):
+            return WriteOutcome(WriteStatus.UNCHANGED, str(facts["text"]), Evidence.DRIVER)
+        # Text typed into the box is not a choice: many autocompletes only take a value when
+        # an option is picked, so a box that merely reads right is searched and picked again.
         options = await self._search(ctx, field, value)
         chosen, candidates = match_option([n.name for n in options], value)
         option = next((n for n in options if n.name == chosen), None)
@@ -448,10 +459,13 @@ class ComboboxDriver:
                 status, await self.read(ctx, field), candidates=candidates, note=note
             )
         await ctx.act(option.handle, Action(ActionKind.PRESS))
+        after = await _call(ctx, field.handle, COMBOBOX_READ_JS)
         got = await self.read(ctx, field)
         if same_value(got, option.name) or normal(option.name).casefold() in got.casefold():
             note = "" if same_value(option.name, value) else f'picked "{option.name}"'
-            return WriteOutcome(WriteStatus.OK, got, Evidence.DRIVER, note=note)
+            # The widget showing the choice outside the box is stronger than the box's text.
+            evidence = Evidence.DRIVER if str(after["text"]) else Evidence.TREE
+            return WriteOutcome(WriteStatus.OK, got, evidence, note=note)
         return WriteOutcome(WriteStatus.MISMATCH, got, note=f'clicked "{option.name}"')
 
 

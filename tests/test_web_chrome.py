@@ -81,6 +81,7 @@ def test_request_expect_passes_on_success_and_fails_on_a_server_error() -> None:
                     expect={"request": {"method": "POST", "url": "/api/fail"}},
                 )
                 assert "expect request: FAILED" in bad and "evidence none" in bad
+                assert "the app's request failed (POST /api/fail 500)" in bad
 
     run(scenario())
 

@@ -1,0 +1,11 @@
+<!doctype html>
+<!-- Loaded from a different origin than the checkout page, so it runs as its own frame. -->
+<meta charset="utf-8">
+<title>Delivery notes</title>
+<label>Delivery instructions <textarea id="instructions" rows="2" cols="50"></textarea></label>
+<script>
+  const field = document.getElementById('instructions');
+  field.addEventListener('input', (event) => {
+    if (event.isTrusted) parent.postMessage({instructions: field.value}, '*');
+  });
+</script>

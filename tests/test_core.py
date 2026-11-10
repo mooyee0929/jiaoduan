@@ -230,6 +230,19 @@ def test_request_expect_fails_on_a_server_error() -> None:
     assert not check(scene([], settle=settle), {"request": {"method": "POST"}}).ok
 
 
+def test_a_failed_request_is_named_even_when_nothing_expected_it() -> None:
+    from agentlayer.engine import _failed_requests
+
+    settle = Settle(True, 5, requests=(
+        RequestRecord("GET", "/api/cities", 200), RequestRecord("POST", "/api/save", 500),
+        RequestRecord("POST", "/api/beacon", None),
+    ))
+    [warning] = _failed_requests(settle)
+    assert "POST /api/save 500" in warning and "cities" not in warning
+    assert "beacon" not in warning
+    assert _failed_requests(Settle(True, 5)) == []
+
+
 def test_expect_rejects_a_spec_without_exactly_one_kind() -> None:
     with pytest.raises(LayerError):
         check(scene([]), {"value": "a", "url": "b"})

@@ -550,9 +550,19 @@ class WebBackend:
         except CdpError as exc:
             log.debug("skipping out-of-process frame %s: %s", frame_id, exc)
             return
-        if subtree is not None:
-            host = _find_handle(root, WebHandle(parent.session_id, owner))
-            (host or root).children.append(subtree)
+        if subtree is None:
+            return
+        host = _find_handle(root, WebHandle(parent.session_id, owner))
+        if host is not None:
+            host.children.append(subtree)
+            return
+        # The iframe element is not in the tree. If it is not rendered either (a hidden step,
+        # a closed tab), neither is its content; otherwise keep the content reachable.
+        try:
+            await self._box(parent, owner)
+        except LayerError:
+            return
+        root.children.append(subtree)
 
     async def _owner_of(
         self, page: Page, frame_id: str, child: Session

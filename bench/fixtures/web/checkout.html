@@ -1,0 +1,161 @@
+<!doctype html>
+<!--
+  A three-step checkout written for testing. It copies no real site; it reproduces:
+  - a remote city autocomplete: suggestions arrive late, and only a picked suggestion counts,
+    typing alone leaves the city empty;
+  - a web component whose fields live in a shadow root;
+  - a cross-origin iframe (localhost next to 127.0.0.1) holding the delivery instructions;
+  - steps that validate before moving on, a Back button, and a final commit.
+-->
+<meta charset="utf-8">
+<title>Checkout</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 24px; max-width: 640px; }
+  label { display: block; margin: 10px 0; }
+  .suggest { position: relative; }
+  .suggest ul { position: absolute; left: 0; right: 0; margin: 0; padding: 0; list-style: none;
+                background: #fff; border: 1px solid #999; z-index: 2; }
+  .suggest li { padding: 4px; }
+  iframe { width: 100%; height: 90px; border: 1px solid #ccc; }
+  [hidden] { display: none !important; }
+</style>
+<main>
+  <h1>Checkout</h1>
+  <p id="progress" aria-live="polite">Step 1 of 3: Address</p>
+  <form id="checkout" aria-label="Checkout">
+    <section id="step-1" aria-label="Address">
+      <h2>Address</h2>
+      <label>Full name <input id="name" required></label>
+      <div class="suggest">
+        <label for="city">City</label>
+        <input id="city" role="combobox" aria-autocomplete="list" aria-expanded="false"
+               aria-controls="city-list" autocomplete="off" required>
+        <ul id="city-list" role="listbox" hidden></ul>
+      </div>
+      <label>Postal code <input id="postal" required></label>
+    </section>
+
+    <section id="step-2" aria-label="Delivery" hidden>
+      <h2>Delivery</h2>
+      <delivery-options></delivery-options>
+      <p id="instructions-label">Delivery instructions</p>
+      <iframe id="notes" title="Delivery instructions" aria-labelledby="instructions-label"></iframe>
+    </section>
+
+    <section id="step-3" aria-label="Review" hidden>
+      <h2>Review</h2>
+      <dl id="summary"></dl>
+    </section>
+
+    <div id="error" role="alert"></div>
+    <button type="button" id="back" hidden>Back</button>
+    <button type="button" id="next">Next</button>
+    <button type="submit" id="place" hidden>Place order</button>
+  </form>
+  <p role="status" id="status"></p>
+</main>
+<script>
+  const store = (window.__store = {});
+  const post = (path, body) => fetch(path, {method: 'POST', body: JSON.stringify(body)})
+    .catch((error) => console.debug('not posted', path, error));
+  const save = (key, value) => { store[key] = value; post('/api/state', {page: 'checkout', store}); };
+
+  for (const id of ['name', 'postal']) {
+    document.getElementById(id).addEventListener('input', (event) => {
+      if (event.isTrusted) save(id, event.target.value);
+    });
+  }
+
+  // City: remote suggestions after a pause in typing; only a click on one sets the city.
+  const city = document.getElementById('city');
+  const list = document.getElementById('city-list');
+  let timer = null;
+  let asked = 0;
+  city.addEventListener('input', (event) => {
+    if (!event.isTrusted) return;
+    save('city', '');
+    clearTimeout(timer);
+    const query = city.value;
+    const ticket = ++asked;
+    timer = setTimeout(async () => {
+      const response = await fetch(`/api/cities?q=${encodeURIComponent(query)}`);
+      const hits = await response.json();
+      if (ticket !== asked) return;  // an answer for an older query
+      list.innerHTML = hits.map((c) => `<li role="option">${c}</li>`).join('');
+      list.hidden = hits.length === 0;
+      city.setAttribute('aria-expanded', String(hits.length > 0));
+    }, 250);
+  });
+  list.addEventListener('mousedown', (event) => {
+    const option = event.target.closest('[role=option]');
+    if (!option) return;
+    event.preventDefault();
+    city.value = option.textContent;
+    list.hidden = true;
+    city.setAttribute('aria-expanded', 'false');
+    save('city', option.textContent);
+  });
+
+  // Delivery speed and gift message live in a shadow root.
+  customElements.define('delivery-options', class extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({mode: 'open'});
+      root.innerHTML = `
+        <fieldset><legend>Delivery speed</legend>
+          <label><input type="radio" name="speed" value="Standard"> Standard</label>
+          <label><input type="radio" name="speed" value="Express"> Express</label>
+        </fieldset>
+        <label>Gift message <textarea id="gift" rows="2"></textarea></label>`;
+      for (const radio of root.querySelectorAll('input[name=speed]')) {
+        radio.addEventListener('change', () => save('speed', radio.value));
+      }
+      root.getElementById('gift').addEventListener('input', (event) => {
+        if (event.isTrusted) save('gift', event.target.value);
+      });
+    }
+  });
+
+  // Delivery instructions come from another origin.
+  const otherOrigin = `${location.protocol}//localhost:${location.port}`;
+  document.getElementById('notes').src = `${otherOrigin}/notes.html`;
+  window.addEventListener('message', (event) => {
+    if (event.origin === otherOrigin && typeof event.data?.instructions === 'string') {
+      save('instructions', event.data.instructions);
+    }
+  });
+
+  // Steps.
+  let step = 1;
+  const titles = {1: 'Address', 2: 'Delivery', 3: 'Review'};
+  const missing = () => {
+    if (step === 1) {
+      return ['name', 'city', 'postal'].filter((k) => !store[k])
+        .map((k) => ({name: 'Full name', city: 'City (pick a suggestion)', postal: 'Postal code'})[k]);
+    }
+    if (step === 2) return store.speed ? [] : ['Delivery speed'];
+    return [];
+  };
+  function show() {
+    for (const n of [1, 2, 3]) document.getElementById(`step-${n}`).hidden = n !== step;
+    document.getElementById('back').hidden = step === 1;
+    document.getElementById('next').hidden = step === 3;
+    document.getElementById('place').hidden = step !== 3;
+    document.getElementById('progress').textContent = `Step ${step} of 3: ${titles[step]}`;
+    if (step === 3) {
+      document.getElementById('summary').innerHTML = ['name', 'city', 'postal', 'speed', 'gift',
+        'instructions'].map((k) => `<dt>${k}</dt><dd>${store[k] || '-'}</dd>`).join('');
+    }
+  }
+  document.getElementById('next').addEventListener('click', () => {
+    const gaps = missing();
+    document.getElementById('error').textContent = gaps.length ? `Missing: ${gaps.join(', ')}` : '';
+    if (!gaps.length) { step += 1; show(); }
+  });
+  document.getElementById('back').addEventListener('click', () => { step -= 1; show(); });
+  document.getElementById('checkout').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (step !== 3) return;
+    post('/api/submit', {page: 'checkout', store});
+    document.getElementById('status').textContent = 'Order placed';
+  });
+</script>

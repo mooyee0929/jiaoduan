@@ -346,6 +346,7 @@ class Engine:
         expects = self._expects(after, info, settle, ref, expect)
         evidence, more = self._evidence(kind, value, ref, after, expects)
         warnings += more
+        warnings += _failed_requests(settle)
         view = self._replaced_view(after) if effect.page_replaced else None
         text = render.action_text(
             kind.value, target, delivery, evidence, effect, expects, warnings, view
@@ -680,6 +681,15 @@ class Engine:
 
     def gate_reject(self, gate_id: str) -> str:
         return f"rejected {self.gate.reject(gate_id).id}"
+
+
+def _failed_requests(settle: Settle) -> list[str]:
+    """Said in words: a page often shows "Saved" before the request behind it has failed."""
+    failed = [r for r in settle.requests if r.status is not None and r.status >= 400]
+    if not failed:
+        return []
+    listed = ", ".join(f"{r.method} {r.path} {r.status}" for r in failed)
+    return [f"the app's request failed ({listed}); what the page shows may not have been kept"]
 
 
 def _backend_kind(target: str) -> str:
