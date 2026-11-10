@@ -33,8 +33,13 @@ def test_commands_disable_built_in_tools_and_other_servers(tmp_path: Path) -> No
     command = claude_command(arm, tmp_path / "c.json", "go", "claude-sonnet-5-5")
     assert command[command.index("--tools") + 1] == ""
     assert "--strict-mcp-config" in command
-    assert "mcp__agent-layer__observe" in command
-    assert "mcp__agent-layer__fill" not in command
+    allowed = command[command.index("--allowedTools") + 1:command.index("--disallowedTools")]
+    hidden = command[command.index("--disallowedTools") + 1:command.index("--setting-sources")]
+    assert "mcp__agent-layer__observe" in allowed
+    assert "mcp__agent-layer__fill" in hidden and "mcp__agent-layer__fill" not in allowed
+    vision = load_arms()["A"]
+    assert "browser_snapshot" in vision.hidden and "browser_evaluate" in vision.hidden
+    assert "--snapshot-mode=none" in vision.command
     env = mcp_config(arm, tmp_path)["mcpServers"]["agent-layer"]["env"]
     assert env["AGENTLAYER_COMMIT"] == "allow"
     assert env["AGENTLAYER_PROFILE"].startswith(str(tmp_path))

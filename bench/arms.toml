@@ -5,11 +5,41 @@
 # installed Chrome. Neither may run page JavaScript: that would let an agent write the page's
 # state directly instead of operating the UI.
 
+# Every tool each server offers. Tools an arm does not allow are hidden from the model with
+# --disallowedTools; --allowedTools alone only skips the permission prompt.
+[server.playwright]
+tools = [
+  "browser_annotate", "browser_click", "browser_close", "browser_console_messages",
+  "browser_cookie_clear", "browser_cookie_delete", "browser_cookie_get", "browser_cookie_list",
+  "browser_cookie_set", "browser_drag", "browser_drop", "browser_emulate_media",
+  "browser_evaluate", "browser_file_upload", "browser_fill_form", "browser_find",
+  "browser_get_config", "browser_handle_dialog", "browser_hide_highlight",
+  "browser_highlight", "browser_hover", "browser_localstorage_clear",
+  "browser_localstorage_delete", "browser_localstorage_get", "browser_localstorage_list",
+  "browser_localstorage_set", "browser_mouse_click_xy", "browser_navigate",
+  "browser_navigate_back", "browser_network_request", "browser_network_requests",
+  "browser_network_state_set", "browser_press_key", "browser_resize", "browser_resume",
+  "browser_route", "browser_route_list", "browser_run_code_unsafe", "browser_select_option",
+  "browser_sessionstorage_clear", "browser_sessionstorage_delete",
+  "browser_sessionstorage_get", "browser_sessionstorage_list", "browser_sessionstorage_set",
+  "browser_set_storage_state", "browser_snapshot", "browser_start_recording",
+  "browser_start_tracing", "browser_start_video", "browser_stop_recording",
+  "browser_stop_tracing", "browser_stop_video", "browser_storage_state", "browser_tabs",
+  "browser_take_screenshot", "browser_type", "browser_unroute", "browser_video_chapter",
+  "browser_video_hide_actions", "browser_video_show_actions", "browser_wait_for",
+]
+
+[server.agent-layer]
+tools = ["surfaces", "open", "observe", "act", "key", "read", "wait", "form", "fill", "tools",
+         "call", "report"]
+
+# A also turns off the page snapshot Playwright appends to action results, so the only view
+# of the page is a screenshot.
 [arm.A]
 label = "screenshots and coordinates (Playwright MCP vision)"
 server = "playwright"
 command = ["npx", "-y", "@playwright/mcp@0.0.83", "--headless", "--isolated",
-           "--browser=chrome", "--caps=vision"]
+           "--browser=chrome", "--caps=vision", "--snapshot-mode=none"]
 tools = ["browser_navigate", "browser_take_screenshot", "browser_mouse_click_xy",
          "browser_press_key", "browser_wait_for", "browser_file_upload"]
 

@@ -44,6 +44,7 @@ class Arm:
     command: tuple[str, ...]
     tools: tuple[str, ...]
     only_kinds: tuple[str, ...] = ()
+    hidden: tuple[str, ...] = ()
 
     def applies(self, task: Task) -> bool:
         return not self.only_kinds or task.kind in self.only_kinds
@@ -63,12 +64,20 @@ class Usage:
 
 def load_arms(path: Path = ARMS) -> dict[str, Arm]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
-    return {
-        key: Arm(key, str(a["label"]), str(a["server"]),
-                 tuple(str(sys.executable) if p == "{python}" else str(p) for p in a["command"]),
-                 tuple(a["tools"]), tuple(a.get("only_kinds", ())))
-        for key, a in data["arm"].items()
-    }
+    arms: dict[str, Arm] = {}
+    for key, a in data["arm"].items():
+        server = str(a["server"])
+        offered = list(data["server"][server]["tools"])
+        unknown = set(a["tools"]) - set(offered)
+        if unknown:
+            raise ValueError(f"arm {key} allows tools {server} does not offer: {sorted(unknown)}")
+        arms[key] = Arm(
+            key, str(a["label"]), server,
+            tuple(str(sys.executable) if p == "{python}" else str(p) for p in a["command"]),
+            tuple(a["tools"]), tuple(a.get("only_kinds", ())),
+            hidden=tuple(t for t in offered if t not in a["tools"]),
+        )
+    return arms
 
 
 def mcp_config(arm: Arm, home: Path) -> dict[str, Any]:
@@ -84,10 +93,15 @@ def mcp_config(arm: Arm, home: Path) -> dict[str, Any]:
 
 def claude_command(arm: Arm, config: Path, prompt: str, model: str) -> list[str]:
     allowed = [f"mcp__{arm.server}__{tool}" for tool in arm.tools]
-    return [
+    hidden = [f"mcp__{arm.server}__{tool}" for tool in arm.hidden]
+    command = [
         "claude", "-p", prompt, "--model", model,
         "--mcp-config", str(config), "--strict-mcp-config",
         "--tools", "", "--allowedTools", *allowed,
+    ]
+    if hidden:
+        command += ["--disallowedTools", *hidden]
+    return command + [
         "--setting-sources", "project", "--no-session-persistence",
         "--output-format", "stream-json", "--verbose",
     ]
