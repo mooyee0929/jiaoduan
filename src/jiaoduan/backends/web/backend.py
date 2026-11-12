@@ -168,6 +168,12 @@ HIT_JS = """function (x, y) {
   return {ok, name: hit.nodeName};
 }"""
 
+CENTER_JS = """function () {
+  const el = this.nodeType === 1 ? this : this.parentElement;
+  if (el) el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+  return !!el;
+}"""
+
 LABEL_OF_JS = """function () { return (this.labels && this.labels[0]) || null; }"""
 
 IS_FILE_INPUT_JS = """function () {
@@ -783,23 +789,30 @@ class WebBackend:
             await asyncio.sleep(_STABLE_WAIT)
         raise LayerError(NOT_ACTIONABLE, "the element kept moving", hint="retry after it settles")
 
-    async def _check_hit(
+    async def _covering(
         self, session: Session, backend_id: int, x: float, y: float
-    ) -> None:
+    ) -> str | None:
+        """The name of whatever sits on top of the element at (x, y), or None when nothing does."""
         result = await self._call_on(session, backend_id, HIT_JS, [{"value": x}, {"value": y}])
         verdict = result["result"].get("value") or {}
-        if not verdict.get("ok"):
-            raise LayerError(
-                NOT_ACTIONABLE,
-                f"something else is on top of the element: {verdict.get('name', 'unknown')}",
-                hint="close the overlay or scroll, then retry",
-            )
+        return None if verdict.get("ok") else str(verdict.get("name", "unknown"))
 
     async def _aim(self, page: Page, web: WebHandle) -> tuple[float, float]:
         session = page.session_for(web.session_id)
         backend = await self._pointer_target(session, web)
         x, y = await self._stable_point(session, backend)
-        await self._check_hit(session, backend, x, y)
+        cover = await self._covering(session, backend, x, y)
+        if cover is not None:
+            # Sticky headers and footers cover elements near the viewport edge.
+            await self._call_on(session, backend, CENTER_JS)
+            x, y = await self._stable_point(session, backend)
+            cover = await self._covering(session, backend, x, y)
+        if cover is not None:
+            raise LayerError(
+                NOT_ACTIONABLE,
+                f"something else is on top of the element: {cover}",
+                hint="close the overlay or scroll, then retry",
+            )
         offset_x, offset_y = await self._frame_offset(page, session)
         return x + offset_x, y + offset_y
 

@@ -114,6 +114,17 @@ def test_overlay_is_detected_instead_of_clicking_something_else() -> None:
     run(scenario())
 
 
+def test_press_scrolls_an_element_out_from_under_a_fixed_footer() -> None:
+    async def scenario() -> None:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                text = await engine.open("a", f"http://{host}/sticky.html")
+                result = await engine.act("a", ref(text, 'button "Add Another"'), "press")
+                assert "delivered" in result and "added" in result
+
+    run(scenario())
+
+
 def test_clickable_div_with_no_role_gets_a_ref() -> None:
     async def scenario() -> None:
         with pages_server() as host:

@@ -1,0 +1,12 @@
+<!doctype html>
+<title>Sticky footer</title>
+<style>
+  body { margin: 0; height: 300vh; }
+  #add { position: absolute; top: calc(100vh - 40px); left: 20px; height: 30px; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 80px; background: #eee; }
+</style>
+<main>
+  <button id="add" onclick="document.getElementById('out').textContent = 'added'">Add Another</button>
+  <p id="out" role="status"></p>
+</main>
+<div id="bar"><button type="button">Back</button> <button type="button">Save and Continue</button></div>
