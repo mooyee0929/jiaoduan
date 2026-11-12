@@ -172,6 +172,50 @@ def test_guard_stops_a_submit_nobody_asked_for() -> None:
     run(scenario())
 
 
+def test_a_get_form_that_takes_personal_data_is_gated_like_any_application() -> None:
+    async def scenario() -> None:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                text = await engine.open("a", f"http://{host}/greenhouse.html")
+                submit = ref(text, 'button "Submit application"')
+                with pytest.raises(LayerError) as caught:
+                    await engine.act("a", submit, "press")
+                assert caught.value.code == "COMMIT_GATED"
+                assert "its label names a commit" in caught.value.message
+                assert "submitted" not in await engine.observe("a")
+                engine.gate_approve("g1")
+                result = await engine.act("a", submit, "press", gate="g1")
+                assert "submitted 200" in result
+
+    run(scenario())
+
+
+def test_guard_stops_an_unasked_submit_of_a_get_application_form() -> None:
+    async def scenario() -> None:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                surface = engine_surface(await engine.open("a", f"http://{host}/greenhouse.html"))
+                page = engine.backend_for(surface).page(surface)  # type: ignore[attr-defined]
+                await page.session.send("Runtime.evaluate", {
+                    "expression": "document.getElementById('application-form').requestSubmit(); 1",
+                })
+                assert "submitted" not in await engine.observe("a")
+
+    run(scenario())
+
+
+def test_a_get_filter_form_is_not_a_commit() -> None:
+    async def scenario() -> None:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                text = await engine.open("a", f"http://{host}/greenhouse.html")
+                result = await engine.act("a", ref(text, 'button "Apply"'), "press")
+                assert "delivered" in result
+                assert "Second page" in await engine.observe("a")
+
+    run(scenario())
+
+
 def engine_surface(text: str):  # type: ignore[no-untyped-def]
     from jiaoduan.model import SurfaceId
 

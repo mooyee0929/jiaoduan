@@ -83,6 +83,17 @@ OBSERVER_JS = f"""(() => {{
   }}).observe(document, {{subtree: true, childList: true, attributes: true, characterData: true}});
 }})();"""
 
+# method=get alone does not make a search: Greenhouse's application form is a GET form whose
+# script posts the answers itself. A GET form that asks for personal data is treated as a commit.
+SEARCH_FORM_JS = r"""(form) => {
+  if (form.getAttribute('role') === 'search') return true;
+  if ((form.getAttribute('method') || '').toLowerCase() !== 'get') return false;
+  const personal = /\b(name|email|tel|street-address|postal-code|bday|username|cc-number)\b/i;
+  return ![...form.elements].some((field) => field.tagName === 'TEXTAREA'
+    || ['file', 'password', 'email', 'tel'].includes((field.type || '').toLowerCase())
+    || personal.test(field.getAttribute('autocomplete') || ''));
+}"""
+
 GUARD_JS = f"""(() => {{
   if (window.__jiaoduanGuard) return;
   const guard = {{armedUntil: 0}};
@@ -90,24 +101,22 @@ GUARD_JS = f"""(() => {{
   window.addEventListener('submit', (event) => {{
     if (Date.now() < guard.armedUntil) return;
     const form = event.target;
-    if (form.getAttribute && (form.getAttribute('role') === 'search'
-        || (form.getAttribute('method') || '').toLowerCase() === 'get')) return;
+    if (form.getAttribute && ({SEARCH_FORM_JS})(form)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (typeof {BINDING} === 'function') {BINDING}('submit-blocked');
   }}, true);
 }})();"""
 
-COMMIT_FACTS_JS = """function () {
+COMMIT_FACTS_JS = f"""function () {{
   const el = this.nodeType === 1 ? this : this.parentElement;
-  if (!el) return {submit: false, search: false};
+  if (!el) return {{submit: false, search: false}};
   const button = el.closest('button, input[type=submit], input[type=image]');
   const form = (button && button.form) || el.closest('form');
   const submit = !!(button && form && (button.type === 'submit' || button.type === 'image'));
-  const search = !!form && (form.getAttribute('role') === 'search'
-    || (form.getAttribute('method') || '').toLowerCase() === 'get');
-  return {submit, search};
-}"""
+  const search = !!form && ({SEARCH_FORM_JS})(form);
+  return {{submit, search}};
+}}"""
 
 KEY_CONTEXT_JS = """function () {
   let el = document.activeElement;

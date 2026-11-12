@@ -1,0 +1,24 @@
+<!doctype html>
+<title>Greenhouse shape</title>
+<main>
+  <form method="get" action="/second.html" aria-label="Filter jobs">
+    <label>Keyword <input name="q"></label>
+    <button type="submit">Apply</button>
+  </form>
+  <form method="get" action="/board/jobs/1" id="application-form" aria-label="Application">
+    <label>First Name <input id="first_name" type="text" autocomplete="given-name"></label>
+    <label>Email <input id="email" type="text" autocomplete="email"></label>
+    <label>Phone <input id="phone" type="tel"></label>
+    <label>Resume <input id="resume" type="file"></label>
+    <div class="application--submit"><button type="submit">Submit application</button></div>
+  </form>
+  <p id="out" role="status"></p>
+</main>
+<script>
+  document.getElementById('application-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    document.getElementById('out').textContent = 'submitted';
+    const r = await fetch('/board/jobs/1', {method: 'POST', body: 'x'});
+    document.getElementById('out').textContent = 'submitted ' + r.status;
+  });
+</script>
