@@ -105,3 +105,21 @@ def test_each_question_is_its_own_field_and_fill_presses_its_own_option() -> Non
     }, report
     assert report.startswith("fill: 7/7 ok"), report
     assert "unchanged" not in report, report
+
+
+def test_a_number_input_is_a_field_that_fill_writes_and_reads_back() -> None:
+    async def scenario() -> tuple[str, str, str, dict[str, str]]:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/education.html")
+                surface = opened.split()[0]
+                before = await engine.form("a")
+                report = await engine.fill("a", {"End date year": "2026"})
+                after = await engine.form("a")
+                return before, report, after, await page_value(engine, surface, "window.__saved")
+
+    before, report, after, saved = run(scenario())
+    assert schema_lines(before)["End date year"].split()[1] == "number", before
+    assert re.search(r'"End date year" ok "2026"', report), report
+    assert 'number "End date year" * = "2026"' in after, after
+    assert saved == {"end-year": "2026"}

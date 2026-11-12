@@ -25,8 +25,9 @@ _MAX_SHOWN_OPTIONS = 8
 LINGER_SECONDS = 0.8
 # Uploads often clear text fields, so they go first; choices can reveal more fields, so last.
 _ORDER = {
-    FieldKind.FILE: 0, FieldKind.TEXT: 1, FieldKind.SELECT: 2, FieldKind.COMBOBOX: 3,
-    FieldKind.LISTBOX: 3, FieldKind.RADIO: 4, FieldKind.BUTTONS: 4, FieldKind.TOGGLE: 4,
+    FieldKind.FILE: 0, FieldKind.TEXT: 1, FieldKind.NUMBER: 1, FieldKind.SELECT: 2,
+    FieldKind.COMBOBOX: 3, FieldKind.LISTBOX: 3, FieldKind.RADIO: 4, FieldKind.BUTTONS: 4,
+    FieldKind.TOGGLE: 4,
 }
 
 
@@ -71,7 +72,7 @@ def confirmed(got: str, wanted: str, kind: FieldKind) -> bool:
         return got == toggle_word(wanted)
     if kind is FieldKind.FILE:
         return wanted.rsplit("/", 1)[-1].casefold() in got.casefold()
-    if kind is FieldKind.TEXT:
+    if kind in {FieldKind.TEXT, FieldKind.NUMBER}:
         # Containment would accept "AdaAda" for "Ada": exactly the doubled-autofill failure.
         return same_value(got, wanted)
     # A picked option is often shown with extra words around it, e.g. "Master of Science (MS)".

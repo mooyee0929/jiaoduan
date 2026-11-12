@@ -35,6 +35,7 @@ _DEFAULT_SETTLE = 1.5
 
 class FieldKind(StrEnum):
     TEXT = "text"
+    NUMBER = "number"
     SELECT = "select"
     COMBOBOX = "combobox"
     LISTBOX = "listbox"
@@ -265,7 +266,8 @@ class _Collector:
             if State.HASPOPUP not in node.states:
                 return
         elif node.role not in {
-            Role.TEXTBOX, Role.SEARCHBOX, Role.COMBOBOX, Role.CHECKBOX, Role.SWITCH,
+            Role.TEXTBOX, Role.SEARCHBOX, Role.SPINBUTTON, Role.COMBOBOX, Role.CHECKBOX,
+            Role.SWITCH,
         }:
             return
         probe = await self.ctx.support.probe(self.ctx.surface, node)

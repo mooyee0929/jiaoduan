@@ -103,6 +103,7 @@ from its real source of truth:
 | Driver | Writes with | Reads from |
 | --- | --- | --- |
 | text | focus, select all, trusted `insertText` | the DOM value, and React's props when present |
+| number | like text (a number input is a spinbutton in the tree) | the DOM value, and React's props when present |
 | select | the one allowed script write, plus `input` and `change` | the selected option's text |
 | toggle, radio | a press, only if the state differs | `checked` / `aria-checked` |
 | buttons | a press, only if not already chosen (a second press often clears it) | ARIA state, or the one member with extra class tokens |

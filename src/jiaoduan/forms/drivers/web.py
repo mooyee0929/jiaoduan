@@ -393,6 +393,28 @@ class TextDriver:
         return WriteOutcome(WriteStatus.MISMATCH, dom, note=note)
 
 
+class NumberDriver:
+    """A number input, which the tree calls a spinbutton; it takes typed text like a box."""
+
+    name: ClassVar[str] = "number"
+    kind: ClassVar[FieldKind] = FieldKind.NUMBER
+
+    def __init__(self) -> None:
+        self._text = TextDriver()
+
+    def match(self, node: Node, probe: Probe) -> int:
+        return 10 if node.role is Role.SPINBUTTON and probe.tag == "INPUT" else 0
+
+    async def options(self, ctx: DriverContext, field: Field) -> tuple[str, ...]:
+        return ()
+
+    async def read(self, ctx: DriverContext, field: Field) -> str:
+        return await self._text.read(ctx, field)
+
+    async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
+        return await self._text.write(ctx, field, value)
+
+
 class SelectDriver:
     name: ClassVar[str] = "select"
     kind: ClassVar[FieldKind] = FieldKind.SELECT
@@ -772,8 +794,8 @@ class FileDriver:
 
 
 DRIVERS: tuple[WidgetDriver, ...] = (
-    TextDriver(), SelectDriver(), ToggleDriver(), RadioDriver(), ButtonGroupDriver(),
-    ComboboxDriver(), ListboxPopupDriver(), FileDriver(),
+    TextDriver(), NumberDriver(), SelectDriver(), ToggleDriver(), RadioDriver(),
+    ButtonGroupDriver(), ComboboxDriver(), ListboxPopupDriver(), FileDriver(),
 )
 
 
