@@ -165,3 +165,22 @@ def test_an_upload_whose_input_is_replaced_by_its_file_name_is_confirmed() -> No
     assert uploaded == "resume.pdf"
     assert report.startswith("fill: 1/1 ok"), report
     assert "mismatch" not in report, report
+
+
+def test_a_plain_apostrophe_picks_an_option_written_with_a_curly_one() -> None:
+    async def scenario() -> tuple[str, str]:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/curly.html")
+                surface = opened.split()[0]
+                lines = schema_lines(await engine.form("a"))
+                field_id = lines["Highest level of education"].split()[0]
+                report = await engine.fill("a", {field_id: "Other master's degree"})
+                chosen = await page_value(
+                    engine, surface, "document.getElementById('level-value').textContent"
+                )
+                return report, chosen
+
+    report, chosen = run(scenario())
+    assert chosen == "Other master’s degree", report
+    assert report.startswith("fill: 1/1 ok"), report

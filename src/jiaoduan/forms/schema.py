@@ -162,8 +162,19 @@ class DriverContext:
         await backend.settle(self.surface, mark, budget)
 
 
+_TYPOGRAPHIC = str.maketrans({
+    "‘": "'", "’": "'", "‚": "'", "′": "'",
+    "“": '"', "”": '"', "„": '"', "″": '"',
+    "–": "-", "—": "-", "−": "-",
+})
+
+
 def normal(text: str | None) -> str:
-    return " ".join((text or "").split())
+    """Collapsed whitespace, with typographic quotes and dashes as their plain forms.
+
+    Pages write "master’s" and "Jan – Mar" where an agent types "master's" and "Jan - Mar".
+    """
+    return " ".join((text or "").translate(_TYPOGRAPHIC).split())
 
 
 def _alnum(text: str) -> str:

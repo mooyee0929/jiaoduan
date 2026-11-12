@@ -68,3 +68,10 @@ def test_match_option_prefers_exact_then_unique_prefix() -> None:
 
 def test_toggle_words() -> None:
     assert toggle_word("Checked") == "on" and toggle_word("0") == "off"
+
+
+def test_match_option_treats_typographic_quotes_and_dashes_as_plain() -> None:
+    options = ["Basic science master’s", "Other master’s degree", "Other graduate degree"]
+    assert match_option(options, "Other master's degree") == ("Other master’s degree", ())
+    assert match_option(["Jan – Mar", "Apr – Jun"], "Jan - Mar")[0] == "Jan – Mar"
+    assert same_value("“Yes”", '"Yes"')
