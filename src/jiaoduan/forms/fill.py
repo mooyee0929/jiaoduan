@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -178,18 +179,23 @@ async def _write_one(
         return WriteOutcome(WriteStatus.ERROR, note=exc.message), item
 
 
-async def _vanished_value(ctx: DriverContext, item: Field | None) -> str | None:
+async def _vanished_value(ctx: DriverContext, item: Field | None, value: str) -> str | None:
     """What a field whose element is gone still shows, when its kind can tell.
 
-    An upload commonly swaps its input for the file name and a Remove button; the group
-    around it still says whether the file is there.
+    An upload commonly swaps its input for the file name and a Remove button. When the field
+    sits in a labelled group, that group says whether the file is there. Without one (Ashby,
+    Lever), the file name appearing anywhere on the page is the only evidence left.
     """
-    if item is None or item.kind is not FieldKind.FILE or not item.group:
+    if item is None or item.kind is not FieldKind.FILE:
         return None
-    try:
-        return await item.driver.read(ctx, item)
-    except LayerError:
-        return None
+    if item.group:
+        try:
+            return await item.driver.read(ctx, item)
+        except LayerError:
+            return None
+    base = os.path.basename(os.path.expanduser(value))
+    text = " ".join(f"{n.name} {n.value or ''}" for n in await ctx.nodes())
+    return base if base.casefold() in text.casefold() else None
 
 
 async def _final_pass(
@@ -210,7 +216,7 @@ async def _final_pass(
             continue  # nothing could be read back when it was written; reported as such
         current = by_id.get(field_id)
         if current is None:
-            shown = await _vanished_value(ctx, written.get(field_id))
+            shown = await _vanished_value(ctx, written.get(field_id), value)
             if shown is not None and confirmed(shown, value, FieldKind.FILE):
                 continue
             results[field_id] = WriteOutcome(

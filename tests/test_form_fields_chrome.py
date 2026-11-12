@@ -146,3 +146,22 @@ def test_late_commits_and_phone_formatting_are_not_mismatches_but_real_ones_are(
     assert 'mismatch "AceAce" (changed after it was written)' in lines["Nickname"], report
     assert report.startswith("fill: 2/4 ok | 2 mismatch"), report
     assert 'text "Phone" = "+1 (626) 423-4933"' in after, after
+
+
+def test_an_upload_whose_input_is_replaced_by_its_file_name_is_confirmed() -> None:
+    async def scenario() -> tuple[str, str]:
+        with tempfile.TemporaryDirectory() as tmp, pages_server() as host:
+            resume = Path(tmp) / "resume.pdf"
+            resume.write_bytes(b"%PDF-1.4 test")
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/ashby_upload.html")
+                surface = opened.split()[0]
+                lines = schema_lines(await engine.form("a"))
+                field_id = lines["Resume"].split()[0]
+                report = await engine.fill("a", {field_id: str(resume)})
+                return report, await page_value(engine, surface, "window.__uploaded")
+
+    report, uploaded = run(scenario())
+    assert uploaded == "resume.pdf"
+    assert report.startswith("fill: 1/1 ok"), report
+    assert "mismatch" not in report, report
