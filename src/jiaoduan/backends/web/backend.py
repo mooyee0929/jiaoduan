@@ -966,6 +966,13 @@ class WebBackend:
         session = page.session_for(web.session_id)
         await session.send("Input.insertText", {"text": text}, timeout=_INPUT_TIMEOUT)
 
+    async def document_of(self, surface: SurfaceId, handle: Handle) -> WebHandle:
+        """The document an element belongs to, which outlives the element itself."""
+        web = _web(handle)
+        session = self._page(surface).session_for(web.session_id)
+        document = await session.send("DOM.getDocument", {"depth": 0})
+        return WebHandle(web.session_id, int(document["root"]["backendNodeId"]))
+
     async def file_inputs(self, surface: SurfaceId) -> list[WebHandle]:
         """Every file input, hidden ones included: they rarely appear in the accessibility tree."""
         page = self._page(surface)

@@ -131,25 +131,120 @@ FILE_READ_JS = """function () {
   return [...(this.files || [])].map((f) => f.name).join(', ');
 }"""
 
-FILE_LABEL_JS = """function () {
-  const clean = (t) => (t || '').replace(/\\s+/g, ' ').trim();
+# Helpers shared by the file scripts. A file input's own label is usually its button's word
+# ("Attach"); the group around it carries the label that tells several uploads apart.
+_FILE_GROUP_HELPERS = """
+  const clean = (t) => (t || '').replace(/\\s+/g, ' ').trim().replace(/[\\s*:]+$/, '');
+  const textOf = (el) => clean(el.innerText || el.textContent);
+  const rootOf = (el) => {
+    const own = el.getRootNode && el.getRootNode();
+    return own && own.getElementById ? own : el.ownerDocument;
+  };
+  const labelling = (el) => {
+    const root = rootOf(el);
+    const found = (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
+      .map((id) => root.getElementById(id)).filter(Boolean);
+    const legend = el.tagName === 'FIELDSET' && el.querySelector(':scope > legend');
+    return legend ? [...found, legend] : found;
+  };
+  const named = (el) => {
+    const byId = labelling(el).filter((l) => l.tagName !== 'LEGEND').map(textOf).join(' ');
+    if (byId) return byId;
+    if (el.getAttribute('aria-label')) return clean(el.getAttribute('aria-label'));
+    const legend = labelling(el).find((l) => l.tagName === 'LEGEND');
+    return legend ? textOf(legend) : '';
+  };
+  const isGroup = (el) => el.tagName === 'FIELDSET'
+    || ['group', 'radiogroup'].includes(el.getAttribute('role'));
+  const foreign = (el, input) => [...el.querySelectorAll('input,select,textarea')].some(
+    (f) => f !== input && f.type !== 'hidden' && f.type !== 'file'
+      && f.getAttribute('aria-hidden') !== 'true' && (!f.checkVisibility || f.checkVisibility()));
+  const fileGroup = (input) => {
+    let best = null;
+    let box = input.parentElement;
+    for (let depth = 0; box && depth < 6; depth++, box = box.parentElement) {
+      if (['FORM', 'BODY'].includes(box.tagName)) break;
+      if (box.querySelectorAll('input[type=file]').length > 1 || foreign(box, input)) break;
+      if (isGroup(box) && named(box)) return {el: box, label: named(box)};
+      best = box;
+    }
+    if (!best) return {el: null, label: ''};
+    const own = [...(input.labels || [])];
+    const walker = best.ownerDocument.createTreeWalker(best, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (!parent || parent.closest('button,[role=button],[aria-live]')) continue;
+      if (own.some((label) => label.contains(parent))) continue;
+      if (parent.checkVisibility && !parent.checkVisibility()) continue;
+      if (clean(walker.currentNode.nodeValue)) return {el: best, label: textOf(parent)};
+    }
+    return {el: best, label: ''};
+  };
+  const fileGroups = (doc) => {
+    const groups = new Map();
+    for (const input of doc.querySelectorAll('input[type=file]')) {
+      const found = fileGroup(input);
+      if (found.el && found.label) groups.set(found.el, found.label);
+    }
+    for (const el of doc.querySelectorAll('fieldset,[role=group],[role=radiogroup]')) {
+      if (!groups.has(el) && named(el)) groups.set(el, named(el));
+    }
+    return groups;
+  };
+  const shows = (el, name) => {
+    const target = name.toLowerCase();
+    const files = [...el.querySelectorAll('input[type=file]')]
+      .flatMap((input) => [...(input.files || [])].map((f) => f.name.toLowerCase()));
+    const quoted = target.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+    const whole = new RegExp(`(^|[\\\\s,;:(\\\\["'])${quoted}($|[\\\\s,;)\\\\]"'])`);
+    return files.includes(target) || whole.test((el.innerText || '').toLowerCase());
+  };
+"""
+
+FILE_LABEL_JS = """function () {""" + _FILE_GROUP_HELPERS + """
   const required = this.required || this.getAttribute('aria-required') === 'true';
-  const done = (label) => ({label: label.slice(0, 60), required});
+  const group = fileGroup(this);
+  const done = (own) => ({
+    label: own.slice(0, 60), group: group.label.slice(0, 60),
+    required: required || Boolean(group.el && group.el.getAttribute('aria-required') === 'true'),
+  });
   if (this.labels && this.labels.length && clean(this.labels[0].innerText)) {
     return done(clean(this.labels[0].innerText));
   }
-  const aria = this.getAttribute('aria-label');
-  if (aria) return done(clean(aria));
-  const labelledby = (this.getAttribute('aria-labelledby') || '').split(/\\s+/)
-    .map((id) => document.getElementById(id)).filter(Boolean)
-    .map((el) => clean(el.innerText)).join(' ');
-  if (labelledby) return done(labelledby);
+  if (named(this)) return done(named(this));
   let box = this.parentElement;
   for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
     const text = clean(box.innerText);
     if (text) return done(text);
   }
   return done(this.name || 'file');
+}"""
+
+# Which groups show a file name now, innermost only: an upload often replaces its input.
+FILE_LANDED_JS = """function (name) {""" + _FILE_GROUP_HELPERS + """
+  const doc = this.ownerDocument || this;
+  const showing = [...fileGroups(doc)].filter(([el]) => shows(el, name));
+  return showing.filter(([el]) => !showing.some(([other]) => other !== el && el.contains(other)))
+    .map(([, label]) => label);
+}"""
+
+# File names a group shows, for a group whose input was replaced or reset after an upload.
+FILE_SHOWN_JS = """function (label) {""" + _FILE_GROUP_HELPERS + """
+  const doc = this.ownerDocument || this;
+  const names = [];
+  for (const [el, own] of fileGroups(doc)) {
+    if (own !== label) continue;
+    const labels = labelling(el);
+    const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (!parent || parent.closest('label') || labels.some((l) => l.contains(parent))) continue;
+      for (const word of walker.currentNode.nodeValue.split(/\\s+/)) {
+        if (/^[^\\\\/]+\\.[A-Za-z0-9]{2,5}$/.test(word) && !names.includes(word)) names.push(word);
+      }
+    }
+  }
+  return names.join(', ');
 }"""
 
 
@@ -542,8 +637,21 @@ class FileDriver:
     async def options(self, ctx: DriverContext, field: Field) -> tuple[str, ...]:
         return ()
 
+    async def _on_document(
+        self, ctx: DriverContext, field: Field, function: str, arg: str
+    ) -> Any:
+        document = await _web(ctx).document_of(ctx.surface, field.handle)
+        return await _call(ctx, document, function, [arg])
+
     async def read(self, ctx: DriverContext, field: Field) -> str:
-        return str(await _call(ctx, field.handle, FILE_READ_JS))
+        """The input's files, or the names its group shows once the input was replaced."""
+        try:
+            files = str(await _call(ctx, field.handle, FILE_READ_JS))
+        except LayerError:
+            files = ""
+        if files or not field.group:
+            return files
+        return str(await self._on_document(ctx, field, FILE_SHOWN_JS, field.group))
 
     async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
         path = os.path.expanduser(value)
@@ -552,10 +660,18 @@ class FileDriver:
         await ctx.act(field.handle, Action(ActionKind.UPLOAD, paths=(path,)), budget=3.0)
         base = os.path.basename(path)
         try:
-            got = await self.read(ctx, field)
+            got = str(await _call(ctx, field.handle, FILE_READ_JS))
         except LayerError:
             got = ""  # the widget replaced its input; the page text below decides
-        if base.casefold() in got.casefold():
+        held = base.casefold() in got.casefold()
+        landed = [str(g) for g in await self._on_document(ctx, field, FILE_LANDED_JS, base)]
+        where = ", ".join(f'"{group}"' for group in landed)
+        if field.group and landed and field.group not in landed:
+            return WriteOutcome(WriteStatus.MISMATCH, got, note=f"landed in {where}")
+        if landed:
+            evidence = Evidence.DRIVER if held else Evidence.TREE
+            return WriteOutcome(WriteStatus.OK, got or base, evidence, note=f"landed in {where}")
+        if held:
             return WriteOutcome(WriteStatus.OK, got, Evidence.DRIVER)
         text = " ".join(f"{n.name} {n.value or ''}" for n in await ctx.nodes())
         if base.casefold() in text.casefold():
@@ -592,9 +708,12 @@ class WebForms:
         fields: list[Field] = []
         for handle in await self._backend.file_inputs(ctx.surface):
             info = await self._backend.call_on(ctx.surface, handle, FILE_LABEL_JS)
-            label = str(info["label"])
+            group = str(info["group"])
+            # The group's label is the identity: every input in a form may be named "Attach".
+            label = group or str(info["label"])
             fields.append(Field(
                 label=label, kind=FieldKind.FILE, driver=driver, handle=handle,
                 locator=Locator(Role.OTHER, f"file:{label}"), required=bool(info["required"]),
+                group=group,
             ))
         return fields

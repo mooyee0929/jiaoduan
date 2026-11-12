@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  Three file inputs that share the accessible name "Attach", each inside a group named by
+  its own label, the way Greenhouse lays them out. Uploading one replaces that group's
+  contents with the file name and a Remove button, and rebuilds the other groups' inputs,
+  so any field known by its position points at the wrong input afterwards.
+-->
+<meta charset="utf-8">
+<title>Uploads</title>
+<style>
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                     clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+<form aria-label="Application">
+  <div class="field-wrapper">
+    <div role="group" aria-labelledby="label-resume" aria-required="true" class="file-upload">
+      <div id="label-resume" class="label">Resume/CV<span class="required">*</span></div>
+      <div class="slot" data-key="resume"></div>
+    </div>
+  </div>
+  <div class="field-wrapper">
+    <div role="group" aria-labelledby="label-under" aria-required="true" class="file-upload">
+      <div id="label-under" class="label">Undergraduate Transcript<span class="required">*</span></div>
+      <div class="slot" data-key="under"></div>
+      <p>Please upload any unofficial undergraduate transcripts</p>
+    </div>
+  </div>
+  <div class="field-wrapper">
+    <div role="group" aria-labelledby="label-grad" aria-required="false" class="file-upload">
+      <div id="label-grad" class="label">Graduate Transcript</div>
+      <div class="slot" data-key="grad"></div>
+    </div>
+  </div>
+</form>
+<script>
+  const uploads = (window.__uploads = {});
+  function empty(slot) {
+    const key = slot.dataset.key;
+    slot.innerHTML = `<button type="button" class="attach">Attach</button>
+      <label class="visually-hidden" for="input-${key}">Attach</label>
+      <input id="input-${key}" class="visually-hidden" type="file">`;
+  }
+  function render() {
+    for (const slot of document.querySelectorAll('.slot')) {
+      const key = slot.dataset.key;
+      if (uploads[key]) {
+        slot.innerHTML = `<span class="filename">${uploads[key]}</span>
+          <button type="button" class="remove">Remove file</button>`;
+      } else {
+        empty(slot);
+      }
+    }
+  }
+  render();
+  document.addEventListener('change', (event) => {
+    const input = event.target;
+    if (input.type !== 'file' || !input.files[0]) return;
+    uploads[input.closest('.slot').dataset.key] = input.files[0].name;
+    setTimeout(render, 50);
+  });
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    const slot = button.closest('.slot');
+    if (button.classList.contains('attach')) slot.querySelector('input').click();
+    if (button.classList.contains('remove')) { delete uploads[slot.dataset.key]; render(); }
+  });
+</script>

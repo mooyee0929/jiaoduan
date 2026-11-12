@@ -74,6 +74,8 @@ class Field:
     required: bool = False
     disabled: bool = False
     section: str = ""
+    # The label of the group the field's own elements sit in, such as an upload's slot.
+    group: str = ""
     members: tuple[Member, ...] = ()
     id: str = ""
     value: str = ""

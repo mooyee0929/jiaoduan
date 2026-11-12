@@ -108,10 +108,12 @@ from its real source of truth:
 | buttons | a press, only if not already chosen (a second press often clears it) | ARIA state, or the one member with extra class tokens |
 | combobox | typing, then a click on the exact option; never Return | the text the widget shows |
 | listbox popup | open, find the popup that just appeared, scroll a virtual list | the button's text |
-| file | `DOM.setFileInputFiles`; no OS dialog | `input.files` |
+| file | `DOM.setFileInputFiles`; no OS dialog | `input.files`, or the file names its group shows |
 
 Order matters: files first (uploads often re-render the form), then text, selects, custom
-pickers and buttons. After the last write it waits briefly and reads every field again, which
+pickers and buttons. A file field is known by the label of the group around it, since every
+input may be named "Attach"; each one is found again by that label after every upload, and
+fill says which group the file landed in. After the last write it waits briefly and reads every field again, which
 catches values a page changes on its own a moment later, such as an autofill that doubles a
 name. New fields that appeared and required fields still empty are listed.
 

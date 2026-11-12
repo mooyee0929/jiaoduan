@@ -1,0 +1,69 @@
+"""Form fields on layouts copied from real application forms, in a real headless Chrome."""
+
+from __future__ import annotations
+
+import json
+import re
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from jiaoduan.engine import Engine
+from jiaoduan.model import SurfaceId
+from tests.web_harness import engine_with_chrome, pages_server, run
+
+pytestmark = pytest.mark.chrome
+
+
+async def page_value(engine: Engine, surface: str, expression: str) -> Any:
+    backend = engine.backend_for(SurfaceId(surface))
+    page = backend.page(SurfaceId(surface))  # type: ignore[attr-defined]
+    result = await page.session.send(
+        "Runtime.evaluate",
+        {"expression": f"JSON.stringify({expression})", "returnByValue": True},
+    )
+    return json.loads(result["result"]["value"])
+
+
+def schema_lines(schema: str) -> dict[str, str]:
+    """Each field line by its quoted label."""
+    found: dict[str, str] = {}
+    for line in schema.splitlines()[1:]:
+        match = re.match(r'f\d+ \w+ "([^"]*)"', line)
+        if match:
+            found[match.group(1)] = line
+    return found
+
+
+def test_file_fields_with_one_name_are_told_apart_by_their_group() -> None:
+    async def scenario() -> tuple[str, str, dict[str, str]]:
+        with tempfile.TemporaryDirectory() as tmp, pages_server() as host:
+            files = {}
+            for name in ("resume.pdf", "undergrad.pdf", "grad.pdf"):
+                files[name] = Path(tmp) / name
+                files[name].write_bytes(b"%PDF-1.4 test")
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/uploads.html")
+                surface = opened.split()[0]
+                schema = await engine.form("a")
+                lines = schema_lines(schema)
+                ids = {label: lines[label].split()[0] for label in (
+                    "Resume/CV", "Undergraduate Transcript", "Graduate Transcript",
+                )}
+                report = await engine.fill("a", {
+                    ids["Resume/CV"]: str(files["resume.pdf"]),
+                    ids["Undergraduate Transcript"]: str(files["undergrad.pdf"]),
+                    ids["Graduate Transcript"]: str(files["grad.pdf"]),
+                })
+                return schema, report, await page_value(engine, surface, "window.__uploads")
+
+    schema, report, uploads = run(scenario())
+    lines = schema_lines(schema)
+    assert " file " in lines["Resume/CV"] and lines["Resume/CV"].count(" *") == 1, schema
+    assert " file " in lines["Graduate Transcript"], schema
+    assert uploads == {"resume": "resume.pdf", "under": "undergrad.pdf", "grad": "grad.pdf"}
+    assert report.startswith("fill: 3/3 ok"), report
+    assert re.search(r'"Undergraduate Transcript" ok .*landed in "Undergraduate Transcript"',
+                     report), report
