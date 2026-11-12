@@ -79,6 +79,7 @@ class Field:
     required: bool = False
     disabled: bool = False
     section: str = ""
+    input_type: str = ""
     # The label of the group the field's own elements sit in, such as an upload's slot.
     group: str = ""
     members: tuple[Member, ...] = ()
@@ -174,6 +175,37 @@ def same_value(got: str, wanted: str) -> bool:
     if left == right:
         return True
     return bool(_alnum(left)) and _alnum(left) == _alnum(right)
+
+
+_MIN_PHONE_DIGITS = 7
+_MAX_COUNTRY_CODE_DIGITS = 3
+
+
+def same_phone(got: str, wanted: str) -> bool:
+    """The same number once a page's formatting, or a country code it adds, is ignored.
+
+    "+1 (626) 423-4933" is "6264234933" reformatted; "62642349336264234933" is a doubled
+    autofill and is not.
+    """
+    if any(c.isalpha() for c in got + wanted):
+        return False
+    have = "".join(c for c in got if c.isdigit())
+    want = "".join(c for c in wanted if c.isdigit())
+    if min(len(have), len(want)) < _MIN_PHONE_DIGITS:
+        return False
+    if have == want:
+        return True
+    (short, _), (long, long_text) = sorted(((have, got), (want, wanted)), key=lambda p: len(p[0]))
+    extra = len(long) - len(short)
+    return (
+        extra <= _MAX_COUNTRY_CODE_DIGITS and long.endswith(short)
+        and long_text.lstrip().startswith("+")
+    )
+
+
+def same_text(got: str, wanted: str, input_type: str = "") -> bool:
+    """``same_value``, also accepting a phone field's own reformatting of the same digits."""
+    return same_value(got, wanted) or input_type == "tel" and same_phone(got, wanted)
 
 
 def match_option(
@@ -291,6 +323,7 @@ class _Collector:
             required=State.REQUIRED in node.states,
             disabled=State.DISABLED in node.states,
             section=self.heading,
+            input_type=probe.input_type.lower(),
         ))
 
     def _siblings(self, index: int, role: Role, limit: int) -> list[int]:

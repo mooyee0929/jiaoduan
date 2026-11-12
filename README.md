@@ -102,7 +102,7 @@ from its real source of truth:
 
 | Driver | Writes with | Reads from |
 | --- | --- | --- |
-| text | focus, select all, trusted `insertText` | the DOM value, and React's props when present |
+| text | focus, select all, trusted `insertText` | the DOM value, and React's props when they control it, waiting briefly for state that commits on a later tick; a tel field may reformat the same digits |
 | number | like text (a number input is a spinbutton in the tree) | the DOM value, and React's props when present |
 | select | the one allowed script write, plus `input` and `change` | the selected option's text |
 | toggle, radio | a press, only if the state differs | `checked` / `aria-checked` |

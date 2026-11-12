@@ -16,6 +16,7 @@ from jiaoduan.forms.schema import (
     WriteStatus,
     collect,
     match_option,
+    same_text,
     same_value,
 )
 from jiaoduan.model import Evidence, Locator
@@ -66,7 +67,7 @@ def toggle_word(value: str) -> str:
     raise LayerError(INVALID_ARGS, f"{value!r} is not on or off")
 
 
-def confirmed(got: str, wanted: str, kind: FieldKind) -> bool:
+def confirmed(got: str, wanted: str, kind: FieldKind, input_type: str = "") -> bool:
     """Does what a field holds now still match what was written into it?"""
     if kind is FieldKind.TOGGLE:
         return got == toggle_word(wanted)
@@ -74,7 +75,7 @@ def confirmed(got: str, wanted: str, kind: FieldKind) -> bool:
         return wanted.rsplit("/", 1)[-1].casefold() in got.casefold()
     if kind in {FieldKind.TEXT, FieldKind.NUMBER}:
         # Containment would accept "AdaAda" for "Ada": exactly the doubled-autofill failure.
-        return same_value(got, wanted)
+        return same_text(got, wanted, input_type)
     # A picked option is often shown with extra words around it, e.g. "Master of Science (MS)".
     return same_value(got, wanted) or bool(wanted) and wanted.casefold() in got.casefold()
 
@@ -215,7 +216,7 @@ async def _final_pass(
             results[field_id] = WriteOutcome(
                 WriteStatus.MISMATCH, note="the field is gone after the form finished updating"
             )
-        elif not confirmed(current.value, value, current.kind):
+        elif not confirmed(current.value, value, current.kind, current.input_type):
             results[field_id] = WriteOutcome(
                 WriteStatus.MISMATCH, got=current.value, evidence=Evidence.NONE,
                 note="changed after it was written",

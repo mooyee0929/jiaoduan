@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  Text fields whose framework state is not simply the DOM value, faked the way React keeps
+  it: an own "__reactProps$..." property on the element.
+  - Phone: uncontrolled (its props carry value: undefined, as React's do for value={undefined}),
+    and the page formats the digits with a country code a moment after typing;
+  - Cover note: a controlled textarea whose state commits on a later tick;
+  - Preferred name: controlled, but its state never takes the typed value: a real mismatch;
+  - Nickname: a late autofill doubles it: a real mismatch.
+-->
+<meta charset="utf-8">
+<title>Profile</title>
+<form aria-label="Profile">
+  <label>Phone <input id="phone" type="tel"></label>
+  <label>Cover note <textarea id="note"></textarea></label>
+  <label>Preferred name <input id="preferred"></label>
+  <label>Nickname <input id="nickname"></label>
+</form>
+<script>
+  const KEY = '__reactProps$fixture';
+  const byId = (id) => document.getElementById(id);
+  byId('phone')[KEY] = {value: undefined, onChange() {}};
+  byId('note')[KEY] = {value: '', onChange() {}};
+  byId('preferred')[KEY] = {value: '', onChange() {}};
+  byId('nickname')[KEY] = {onChange() {}};
+
+  function formatPhone(raw) {
+    const d = raw.replace(/\D/g, '').slice(-10);
+    if (d.length < 10) return raw;
+    return `+1 (${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  }
+  let phoneTimer = null;
+  byId('phone').addEventListener('input', () => {
+    clearTimeout(phoneTimer);
+    phoneTimer = setTimeout(() => { byId('phone').value = formatPhone(byId('phone').value); }, 300);
+  });
+  let noteTimer = null;
+  byId('note').addEventListener('input', () => {
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => {
+      byId('note')[KEY] = {...byId('note')[KEY], value: byId('note').value};
+    }, 300);
+  });
+  let doubled = false;
+  byId('nickname').addEventListener('input', () => {
+    if (doubled) return;
+    doubled = true;
+    setTimeout(() => {
+      const field = byId('nickname');
+      field.value = field.value + field.value;
+    }, 400);
+  });
+</script>

@@ -123,3 +123,26 @@ def test_a_number_input_is_a_field_that_fill_writes_and_reads_back() -> None:
     assert re.search(r'"End date year" ok "2026"', report), report
     assert 'number "End date year" * = "2026"' in after, after
     assert saved == {"end-year": "2026"}
+
+
+def test_late_commits_and_phone_formatting_are_not_mismatches_but_real_ones_are() -> None:
+    note = "I want to learn how large systems stay up, and to help build them."
+
+    async def scenario() -> tuple[str, str]:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                await engine.open("a", f"http://{host}/profile.html")
+                report = await engine.fill("a", {
+                    "Phone": "6264234933", "Cover note": note,
+                    "Preferred name": "Ada", "Nickname": "Ace",
+                })
+                return report, await engine.form("a")
+
+    report, after = run(scenario())
+    lines = {line.split()[2].strip('"'): line for line in report.splitlines()[1:]}
+    assert re.search(r'"Phone" ok', lines["Phone"]), report
+    assert re.search(r'"Cover note" ok .* evidence driver', report), report
+    assert 'mismatch "Ada" (the framework holds "")' in lines["Preferred"], report
+    assert 'mismatch "AceAce" (changed after it was written)' in lines["Nickname"], report
+    assert report.startswith("fill: 2/4 ok | 2 mismatch"), report
+    assert 'text "Phone" = "+1 (626) 423-4933"' in after, after

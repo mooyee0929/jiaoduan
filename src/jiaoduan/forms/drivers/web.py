@@ -22,11 +22,14 @@ from jiaoduan.forms.schema import (
     WriteStatus,
     match_option,
     normal,
+    same_text,
     same_value,
 )
 from jiaoduan.model import Action, ActionKind, Evidence, Handle, Locator, Node, Role, State
 
 _OPTION_WAIT = 3.0
+_COMMIT_WAIT = 1.2
+_COMMIT_POLL = 0.1
 _OPTION_POLL = 0.1
 _SCROLL_PAGES = 25
 
@@ -153,11 +156,11 @@ PROBE_JS = """function () {""" + _CHOICE_HELPERS + """
 TEXT_READ_JS = """function () {
   const key = Object.keys(this).find((k) => k.startsWith('__reactProps$'));
   const props = key ? this[key] : null;
-  const controlled = props && Object.prototype.hasOwnProperty.call(props, 'value');
+  // value={undefined} or value={null} leaves an input uncontrolled: the DOM is the state.
+  const controlled = props && props.value !== undefined && props.value !== null;
   return {
     dom: this.isContentEditable ? this.innerText : this.value,
-    framework: controlled ? String(props.value === null || props.value === undefined
-      ? '' : props.value) : null,
+    framework: controlled ? String(props.value) : null,
   };
 }"""
 
@@ -363,30 +366,49 @@ class TextDriver:
     async def read(self, ctx: DriverContext, field: Field) -> str:
         return (await self._facts(ctx, field))[0]
 
-    def _grade(self, dom: str, framework: str | None, wanted: str) -> WriteOutcome | None:
+    def _grade(
+        self, field: Field, dom: str, framework: str | None, wanted: str
+    ) -> WriteOutcome | None:
         """Tree evidence from the DOM; driver evidence when the framework's state agrees."""
-        if not same_value(dom, wanted):
+        if not same_text(dom, wanted, field.input_type):
             return None
         if framework is None:
             return _ok(dom, wanted, Evidence.TREE)
-        return _ok(dom, wanted, Evidence.DRIVER) if same_value(framework, wanted) else None
+        if same_text(framework, wanted, field.input_type):
+            return _ok(dom, wanted, Evidence.DRIVER)
+        return None
+
+    async def _settled(
+        self, ctx: DriverContext, field: Field, wanted: str
+    ) -> tuple[str, str | None, WriteOutcome | None]:
+        """Read back, waiting while only the framework is behind the DOM.
+
+        Many forms commit their state on a later tick, after a debounce or a re-render; a
+        read straight after typing would call a value the page is about to take a mismatch.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _COMMIT_WAIT
+        while True:
+            dom, framework = await self._facts(ctx, field)
+            graded = self._grade(field, dom, framework, wanted)
+            behind = graded is None and same_text(dom, wanted, field.input_type)
+            if not behind or loop.time() >= deadline:
+                return dom, framework, graded
+            await asyncio.sleep(_COMMIT_POLL)
 
     async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
         dom, framework = await self._facts(ctx, field)
-        graded = self._grade(dom, framework, value)
+        graded = self._grade(field, dom, framework, value)
         if graded is not None:
             return WriteOutcome(WriteStatus.UNCHANGED, dom, graded.evidence)
         await ctx.act(field.handle, Action(ActionKind.SET, text=value))
-        dom, framework = await self._facts(ctx, field)
-        graded = self._grade(dom, framework, value)
+        dom, framework, graded = await self._settled(ctx, field, value)
         if graded is not None:
             return graded
         # Some fields only accept real key events.
         await ctx.act(field.handle, Action(ActionKind.SET, text=""))
         await _web(ctx).type_keys(ctx.surface, field.handle, value)
-        await asyncio.sleep(0.05)
-        dom, framework = await self._facts(ctx, field)
-        graded = self._grade(dom, framework, value)
+        dom, framework, graded = await self._settled(ctx, field, value)
         if graded is not None:
             return WriteOutcome(graded.status, dom, graded.evidence, note="needed key events")
         note = f'the framework holds "{framework}"' if framework is not None else ""
