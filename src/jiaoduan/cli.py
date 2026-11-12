@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, TextIO
 
 from jiaoduan.client import Client
-from jiaoduan.errors import LayerError
+from jiaoduan.errors import SURFACES_OPEN, LayerError
 
 CLI_AGENT = "cli"
 
@@ -88,6 +88,9 @@ def _parser() -> argparse.ArgumentParser:
 
     login = commands.add_parser("login", help="open a visible browser to sign in to a site")
     login.add_argument("url", nargs="?", default="about:blank")
+    login.add_argument(
+        "--force", action="store_true", help="sign in even though it closes the agents' open tabs"
+    )
 
     adapter = commands.add_parser("adapter", help="adapter tools")
     adapter_commands = adapter.add_subparsers(dest="adapter_command", required=True)
@@ -198,16 +201,35 @@ async def _dispatch(options: argparse.Namespace) -> str:
     raise LayerError("INVALID_ARGS", f"unknown command {command}")
 
 
-async def _login(url: str) -> str:
+def tabs_lost(listing: str) -> list[str]:
+    """The web tabs in a `surfaces` listing that a daemon shutdown would throw away."""
+    return [
+        line for line in listing.splitlines()
+        if line.startswith("web:") and not line.rstrip().endswith("about:blank")
+    ]
+
+
+async def _login(url: str, force: bool) -> str:
     """A visible browser on the agents' profile, with no gate, so a person can sign in."""
     from jiaoduan.backends.web.cdp import Connection
     from jiaoduan.backends.web.launch import default_profile, launch_chrome
 
     try:
         async with Client(CLI_AGENT, role="operator", spawn=False) as client:
+            lost = tabs_lost(await client.call("surfaces"))
+            if lost and not force:
+                raise LayerError(
+                    SURFACES_OPEN,
+                    f"signing in restarts the browser and closes {len(lost)} open tab(s): "
+                    + "; ".join(line[:80] for line in lost),
+                    hint="finish or abandon those tabs first, sign in inside the headed daemon "
+                    "window (JIAODUAN_HEADED=1), or pass --force",
+                )
             await client.call("shutdown")
-    except LayerError:
-        pass  # no daemon was running, which is what login needs
+    except LayerError as exc:
+        if exc.code == SURFACES_OPEN:
+            raise
+        # no daemon was running, which is what login needs
     await asyncio.sleep(1.0)
     chrome = await launch_chrome(default_profile(), headless=False, extra_args=(url,))
     connection = Connection(chrome.transport)
@@ -222,7 +244,7 @@ async def _login(url: str) -> str:
 
 def _run_special(options: argparse.Namespace) -> str | None:
     if options.command == "login":
-        return asyncio.run(_login(options.url))
+        return asyncio.run(_login(options.url, options.force))
     if options.command == "adapter":
         from jiaoduan.adapters.tools import check_paths, draft_from_trace
 
