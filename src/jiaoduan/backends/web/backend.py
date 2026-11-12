@@ -233,6 +233,9 @@ class WebOptions:
     headless: bool = True
     mock_keychain: bool = False
     extra_args: tuple[str, ...] = ()
+    # The in-page submit guard also stops a person's own clicks (signing in, creating an
+    # account). Under the ``allow`` commit policy nothing is gated, so the guard stays out.
+    page_guard: bool = True
 
 
 def default_options() -> WebOptions:
@@ -495,6 +498,8 @@ class WebBackend:
         raise LayerError(BACKEND_UNAVAILABLE, "the new window did not attach")
 
     async def _install_guard(self, page: Page) -> None:
+        if not self._options.page_guard:
+            return
         added = await page.session.send(
             "Page.addScriptToEvaluateOnNewDocument",
             {"source": GUARD_JS, "worldName": WORLD, "runImmediately": True},
