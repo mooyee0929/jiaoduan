@@ -940,7 +940,15 @@ class WebBackend:
         web = _web(handle)
         session = page.session_for(web.session_id)
         encoded = [{"value": a} for a in (args or [])]
-        result = await self._call_on(session, web.backend_id, function, encoded)
+        try:
+            result = await self._call_on(session, web.backend_id, function, encoded)
+        except CdpError as exc:
+            if any(word in exc.detail.lower() for word in _GONE_MESSAGES):
+                raise LayerError(
+                    STALE_REF, f"the element no longer exists: {exc.detail}",
+                    hint="call observe and use a ref from it",
+                ) from exc
+            raise
         if "exceptionDetails" in result:
             raise LayerError(
                 NOT_ACTIONABLE,

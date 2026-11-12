@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from jiaoduan import prune
+from jiaoduan.errors import STALE_REF, LayerError
 from jiaoduan.model import (
     Action,
     Delivery,
@@ -408,7 +409,22 @@ class _Collector:
 async def collect(
     ctx: DriverContext, root: str | None, *, with_values: bool = True
 ) -> list[Field]:
-    """Every field on the surface, or under ``root``, in document order."""
+    """Every field on the surface, or under ``root``, in document order.
+
+    An upload or a conditional question can re-render the form while it is being read; the
+    read then starts over once from a fresh tree instead of failing the whole fill.
+    """
+    try:
+        return await _collect_once(ctx, root, with_values=with_values)
+    except LayerError as exc:
+        if exc.code != STALE_REF:
+            raise
+        return await _collect_once(ctx, root, with_values=with_values)
+
+
+async def _collect_once(
+    ctx: DriverContext, root: str | None, *, with_values: bool
+) -> list[Field]:
     nodes = await ctx.nodes()
     scoped: Sequence[Node] = nodes
     if root is not None:
