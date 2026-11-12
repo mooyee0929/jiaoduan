@@ -27,7 +27,7 @@ from jiaoduan.backends.web.cdp import CdpDisconnected, CdpError, CdpTimeout
 from jiaoduan.backends.web.launch import default_profile
 from jiaoduan.engine import Engine, jsonable_expect
 from jiaoduan.errors import BACKEND_UNAVAILABLE, INVALID_ARGS, LayerError
-from jiaoduan.gate import Gate
+from jiaoduan.gate import POLICY_ENV, Gate, Policy
 from jiaoduan.model import Backend, Delivery
 from jiaoduan.trace import Trace
 
@@ -50,6 +50,7 @@ def web_options() -> WebOptions:
         profile=Path(profile) if profile else default_profile(),
         headless=os.environ.get(HEADED_ENV) != "1",
         mock_keychain=os.environ.get(MOCK_KEYCHAIN_ENV) == "1",
+        page_guard=os.environ.get(POLICY_ENV, Policy.ASK.value) != Policy.ALLOW.value,
     )
 
 

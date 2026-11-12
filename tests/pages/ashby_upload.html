@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  An Ashby-style upload with no group heading around it: the input is labelled only by
+  itself, and once a file is chosen the whole input is removed and replaced by a chip with
+  the file name and a Replace button. Before the fix, fill reported the upload as a mismatch
+  ("the field is gone") even though the file was attached.
+-->
+<html>
+<head><meta charset="utf-8"><title>Ashby upload</title></head>
+<body>
+<form id="application">
+  <label for="name">Name</label>
+  <input id="name" name="name" required>
+  <div id="resume-slot">
+    <label for="resume">Resume</label>
+    <input id="resume" type="file" required>
+  </div>
+  <button type="submit">Submit Application</button>
+</form>
+<script>
+  window.__uploaded = null;
+  document.getElementById('resume').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    window.__uploaded = file ? file.name : null;
+    setTimeout(() => {
+      const slot = document.getElementById('resume-slot');
+      slot.innerHTML = '';
+      const chip = document.createElement('div');
+      chip.textContent = window.__uploaded;
+      const replace = document.createElement('button');
+      replace.type = 'button';
+      replace.textContent = 'Replace';
+      slot.append(chip, replace);
+    }, 50);
+  });
+</script>
+</body>
+</html>

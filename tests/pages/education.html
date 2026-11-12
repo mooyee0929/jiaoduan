@@ -1,0 +1,23 @@
+<!doctype html>
+<!--
+  An education block the way Greenhouse writes it: the years are number inputs, which the
+  accessibility tree calls spinbuttons. The page keeps only trusted input.
+-->
+<meta charset="utf-8">
+<title>Education</title>
+<form aria-label="Education">
+  <div class="input-wrapper">
+    <label id="school-label" for="school">School</label>
+    <input id="school" type="text">
+  </div>
+  <div class="input-wrapper">
+    <label id="end-year-label" for="end-year" class="label">End date year<span aria-hidden="true">*</span></label>
+    <input id="end-year" class="input" aria-label="End date year" aria-required="true" type="number">
+  </div>
+</form>
+<script>
+  const saved = (window.__saved = {});
+  document.addEventListener('input', (event) => {
+    if (event.isTrusted) saved[event.target.id] = event.target.value;
+  });
+</script>

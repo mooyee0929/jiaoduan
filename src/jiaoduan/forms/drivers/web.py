@@ -22,15 +22,112 @@ from jiaoduan.forms.schema import (
     WriteStatus,
     match_option,
     normal,
+    same_text,
     same_value,
 )
 from jiaoduan.model import Action, ActionKind, Evidence, Handle, Locator, Node, Role, State
 
 _OPTION_WAIT = 3.0
+_COMMIT_WAIT = 1.2
+_COMMIT_POLL = 0.1
 _OPTION_POLL = 0.1
 _SCROLL_PAGES = 25
 
-PROBE_JS = """function () {
+# Naming helpers shared by the page scripts below.
+_LABEL_HELPERS = """
+  const clean = (t) => (t || '').replace(/\\s+/g, ' ').trim().replace(/[\\s*:]+$/, '');
+  const textOf = (el) => clean(el.innerText || el.textContent);
+  const rootOf = (el) => {
+    const own = el.getRootNode && el.getRootNode();
+    return own && own.getElementById ? own : el.ownerDocument;
+  };
+  const labelling = (el) => {
+    const root = rootOf(el);
+    const found = (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
+      .map((id) => root.getElementById(id)).filter(Boolean);
+    const legend = el.tagName === 'FIELDSET' && el.querySelector(':scope > legend');
+    return legend ? [...found, legend] : found;
+  };
+  const named = (el) => {
+    const byId = labelling(el).filter((l) => l.tagName !== 'LEGEND').map(textOf).join(' ');
+    if (byId) return byId;
+    if (el.getAttribute('aria-label')) return clean(el.getAttribute('aria-label'));
+    const legend = labelling(el).find((l) => l.tagName === 'LEGEND');
+    return legend ? textOf(legend) : '';
+  };
+  const isGroup = (el) => el.tagName === 'FIELDSET'
+    || ['group', 'radiogroup'].includes(el.getAttribute('role'));
+"""
+
+# Which question a radio or a choice button belongs to. Neighbouring questions often sit in
+# unnamed wrappers, so the accessibility tree shows their options as one run of siblings;
+# the DOM still says where one question ends. The key is the question's container (or the
+# radio name), the label is that container's own text.
+_CHOICE_HELPERS = _LABEL_HELPERS + """
+  const CONTROLS = 'input:not([type=hidden]),select,textarea,button,[role=button],'
+    + '[role=radio],[role=checkbox],[role=switch],[role=combobox],[role=textbox]';
+  const shown = (el) => el.getAttribute('aria-hidden') !== 'true'
+    && (!el.checkVisibility || el.checkVisibility());
+  const pathOf = (el) => {
+    const parts = [];
+    for (let node = el; node && node.parentElement; node = node.parentElement) {
+      parts.push([...node.parentElement.children].indexOf(node));
+    }
+    return parts.reverse().join('.');
+  };
+  const commonBox = (els) => {
+    let box = els[0].parentElement;
+    while (box && !els.every((el) => box.contains(el))) box = box.parentElement;
+    return box;
+  };
+  const choiceGroup = (el) => {
+    const role = el.getAttribute('role') || '';
+    const radio = el.type === 'radio' || role === 'radio';
+    const kind = radio ? 'input[type=radio],[role=radio]'
+      : 'button,[role=button],input[type=button]';
+    const doc = el.ownerDocument;
+    let members = [el];
+    let key = '';
+    if (el.tagName === 'INPUT' && el.type === 'radio' && el.name) {
+      members = [...(el.form || doc).querySelectorAll('input[type=radio]')]
+        .filter((r) => r.name === el.name);
+      key = 'name:' + el.name;
+    } else {
+      let box = el.parentElement;
+      for (let depth = 0; box && depth < 2; depth++, box = box.parentElement) {
+        if (['FORM', 'BODY'].includes(box.tagName)) break;
+        const found = [...box.querySelectorAll(kind)];
+        if (found.length > 1) { members = found; break; }
+        if (isGroup(box)) break;
+      }
+    }
+    const row = members.length > 1 ? commonBox(members) : el.parentElement;
+    const outside = (box) => [...box.querySelectorAll(CONTROLS)].some(
+      (c) => !members.includes(c) && !(row && row.contains(c)) && shown(c));
+    let box = row;
+    let question = '';
+    for (let depth = 0; box && depth < 6; depth++) {
+      if (isGroup(box) && named(box)) { question = named(box); break; }
+      const parent = box.parentElement;
+      if (!parent || ['FORM', 'BODY'].includes(parent.tagName) || outside(parent)) break;
+      box = parent;
+    }
+    if (box && !question) {
+      const optionLabels = [...doc.querySelectorAll('label')].filter((label) => members.some(
+        (m) => label.control === m || label.contains(m)));
+      const walker = doc.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const parent = walker.currentNode.parentElement;
+        if (!parent || members.some((m) => m.contains(parent))) continue;
+        if (optionLabels.some((label) => label.contains(parent)) || !shown(parent)) continue;
+        if (clean(walker.currentNode.nodeValue)) { question = textOf(parent); break; }
+      }
+    }
+    return {key: key || (box ? 'at:' + pathOf(box) : ''), question: question.slice(0, 200)};
+  };
+"""
+
+PROBE_JS = """function () {""" + _CHOICE_HELPERS + """
   const has = (name) => this.hasAttribute && this.hasAttribute(name);
   const own = this.getRootNode && this.getRootNode();
   const root = own && own.getElementById ? own : document;
@@ -39,6 +136,10 @@ PROBE_JS = """function () {
     .filter((el) => el && el !== this && !this.contains(el))
     .map((el) => (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim())
     .filter(Boolean).join(' ');
+  const role = (this.getAttribute && this.getAttribute('role')) || '';
+  const choice = this.type === 'radio' || this.tagName === 'BUTTON'
+    || ['radio', 'button'].includes(role);
+  const group = choice ? choiceGroup(this) : {key: '', question: ''};
   return {
     label: outside,
     tag: this.tagName || '',
@@ -47,17 +148,19 @@ PROBE_JS = """function () {
     autocomplete: (this.getAttribute && this.getAttribute('aria-autocomplete')) || '',
     name: (this.getAttribute && this.getAttribute('name')) || '',
     pressable: ['aria-pressed', 'aria-checked', 'aria-selected', 'data-state'].some(has),
+    group: group.key,
+    question: group.question,
   };
 }"""
 
 TEXT_READ_JS = """function () {
   const key = Object.keys(this).find((k) => k.startsWith('__reactProps$'));
   const props = key ? this[key] : null;
-  const controlled = props && Object.prototype.hasOwnProperty.call(props, 'value');
+  // value={undefined} or value={null} leaves an input uncontrolled: the DOM is the state.
+  const controlled = props && props.value !== undefined && props.value !== null;
   return {
     dom: this.isContentEditable ? this.innerText : this.value,
-    framework: controlled ? String(props.value === null || props.value === undefined
-      ? '' : props.value) : null,
+    framework: controlled ? String(props.value) : null,
   };
 }"""
 
@@ -131,25 +234,98 @@ FILE_READ_JS = """function () {
   return [...(this.files || [])].map((f) => f.name).join(', ');
 }"""
 
-FILE_LABEL_JS = """function () {
-  const clean = (t) => (t || '').replace(/\\s+/g, ' ').trim();
+# Helpers shared by the file scripts. A file input's own label is usually its button's word
+# ("Attach"); the group around it carries the label that tells several uploads apart.
+_FILE_GROUP_HELPERS = _LABEL_HELPERS + """
+  const foreign = (el, input) => [...el.querySelectorAll('input,select,textarea')].some(
+    (f) => f !== input && f.type !== 'hidden' && f.type !== 'file'
+      && f.getAttribute('aria-hidden') !== 'true' && (!f.checkVisibility || f.checkVisibility()));
+  const fileGroup = (input) => {
+    let best = null;
+    let box = input.parentElement;
+    for (let depth = 0; box && depth < 6; depth++, box = box.parentElement) {
+      if (['FORM', 'BODY'].includes(box.tagName)) break;
+      if (box.querySelectorAll('input[type=file]').length > 1 || foreign(box, input)) break;
+      if (isGroup(box) && named(box)) return {el: box, label: named(box)};
+      best = box;
+    }
+    if (!best) return {el: null, label: ''};
+    const own = [...(input.labels || [])];
+    const walker = best.ownerDocument.createTreeWalker(best, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (!parent || parent.closest('button,[role=button],[aria-live]')) continue;
+      if (own.some((label) => label.contains(parent))) continue;
+      if (parent.checkVisibility && !parent.checkVisibility()) continue;
+      if (clean(walker.currentNode.nodeValue)) return {el: best, label: textOf(parent)};
+    }
+    return {el: best, label: ''};
+  };
+  const fileGroups = (doc) => {
+    const groups = new Map();
+    for (const input of doc.querySelectorAll('input[type=file]')) {
+      const found = fileGroup(input);
+      if (found.el && found.label) groups.set(found.el, found.label);
+    }
+    for (const el of doc.querySelectorAll('fieldset,[role=group],[role=radiogroup]')) {
+      if (!groups.has(el) && named(el)) groups.set(el, named(el));
+    }
+    return groups;
+  };
+  const shows = (el, name) => {
+    const target = name.toLowerCase();
+    const files = [...el.querySelectorAll('input[type=file]')]
+      .flatMap((input) => [...(input.files || [])].map((f) => f.name.toLowerCase()));
+    const quoted = target.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+    const whole = new RegExp(`(^|[\\\\s,;:(\\\\["'])${quoted}($|[\\\\s,;)\\\\]"'])`);
+    return files.includes(target) || whole.test((el.innerText || '').toLowerCase());
+  };
+"""
+
+FILE_LABEL_JS = """function () {""" + _FILE_GROUP_HELPERS + """
   const required = this.required || this.getAttribute('aria-required') === 'true';
-  const done = (label) => ({label: label.slice(0, 60), required});
+  const group = fileGroup(this);
+  const done = (own) => ({
+    label: own.slice(0, 60), group: group.label.slice(0, 60),
+    required: required || Boolean(group.el && group.el.getAttribute('aria-required') === 'true'),
+  });
   if (this.labels && this.labels.length && clean(this.labels[0].innerText)) {
     return done(clean(this.labels[0].innerText));
   }
-  const aria = this.getAttribute('aria-label');
-  if (aria) return done(clean(aria));
-  const labelledby = (this.getAttribute('aria-labelledby') || '').split(/\\s+/)
-    .map((id) => document.getElementById(id)).filter(Boolean)
-    .map((el) => clean(el.innerText)).join(' ');
-  if (labelledby) return done(labelledby);
+  if (named(this)) return done(named(this));
   let box = this.parentElement;
   for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
     const text = clean(box.innerText);
     if (text) return done(text);
   }
   return done(this.name || 'file');
+}"""
+
+# Which groups show a file name now, innermost only: an upload often replaces its input.
+FILE_LANDED_JS = """function (name) {""" + _FILE_GROUP_HELPERS + """
+  const doc = this.ownerDocument || this;
+  const showing = [...fileGroups(doc)].filter(([el]) => shows(el, name));
+  return showing.filter(([el]) => !showing.some(([other]) => other !== el && el.contains(other)))
+    .map(([, label]) => label);
+}"""
+
+# File names a group shows, for a group whose input was replaced or reset after an upload.
+FILE_SHOWN_JS = """function (label) {""" + _FILE_GROUP_HELPERS + """
+  const doc = this.ownerDocument || this;
+  const names = [];
+  for (const [el, own] of fileGroups(doc)) {
+    if (own !== label) continue;
+    const labels = labelling(el);
+    const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const parent = walker.currentNode.parentElement;
+      if (!parent || parent.closest('label') || labels.some((l) => l.contains(parent))) continue;
+      for (const word of walker.currentNode.nodeValue.split(/\\s+/)) {
+        if (/^[^\\\\/]+\\.[A-Za-z0-9]{2,5}$/.test(word) && !names.includes(word)) names.push(word);
+      }
+    }
+  }
+  return names.join(', ');
 }"""
 
 
@@ -190,34 +366,75 @@ class TextDriver:
     async def read(self, ctx: DriverContext, field: Field) -> str:
         return (await self._facts(ctx, field))[0]
 
-    def _grade(self, dom: str, framework: str | None, wanted: str) -> WriteOutcome | None:
+    def _grade(
+        self, field: Field, dom: str, framework: str | None, wanted: str
+    ) -> WriteOutcome | None:
         """Tree evidence from the DOM; driver evidence when the framework's state agrees."""
-        if not same_value(dom, wanted):
+        if not same_text(dom, wanted, field.input_type):
             return None
         if framework is None:
             return _ok(dom, wanted, Evidence.TREE)
-        return _ok(dom, wanted, Evidence.DRIVER) if same_value(framework, wanted) else None
+        if same_text(framework, wanted, field.input_type):
+            return _ok(dom, wanted, Evidence.DRIVER)
+        return None
+
+    async def _settled(
+        self, ctx: DriverContext, field: Field, wanted: str
+    ) -> tuple[str, str | None, WriteOutcome | None]:
+        """Read back, waiting while only the framework is behind the DOM.
+
+        Many forms commit their state on a later tick, after a debounce or a re-render; a
+        read straight after typing would call a value the page is about to take a mismatch.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _COMMIT_WAIT
+        while True:
+            dom, framework = await self._facts(ctx, field)
+            graded = self._grade(field, dom, framework, wanted)
+            behind = graded is None and same_text(dom, wanted, field.input_type)
+            if not behind or loop.time() >= deadline:
+                return dom, framework, graded
+            await asyncio.sleep(_COMMIT_POLL)
 
     async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
         dom, framework = await self._facts(ctx, field)
-        graded = self._grade(dom, framework, value)
+        graded = self._grade(field, dom, framework, value)
         if graded is not None:
             return WriteOutcome(WriteStatus.UNCHANGED, dom, graded.evidence)
         await ctx.act(field.handle, Action(ActionKind.SET, text=value))
-        dom, framework = await self._facts(ctx, field)
-        graded = self._grade(dom, framework, value)
+        dom, framework, graded = await self._settled(ctx, field, value)
         if graded is not None:
             return graded
         # Some fields only accept real key events.
         await ctx.act(field.handle, Action(ActionKind.SET, text=""))
         await _web(ctx).type_keys(ctx.surface, field.handle, value)
-        await asyncio.sleep(0.05)
-        dom, framework = await self._facts(ctx, field)
-        graded = self._grade(dom, framework, value)
+        dom, framework, graded = await self._settled(ctx, field, value)
         if graded is not None:
             return WriteOutcome(graded.status, dom, graded.evidence, note="needed key events")
         note = f'the framework holds "{framework}"' if framework is not None else ""
         return WriteOutcome(WriteStatus.MISMATCH, dom, note=note)
+
+
+class NumberDriver:
+    """A number input, which the tree calls a spinbutton; it takes typed text like a box."""
+
+    name: ClassVar[str] = "number"
+    kind: ClassVar[FieldKind] = FieldKind.NUMBER
+
+    def __init__(self) -> None:
+        self._text = TextDriver()
+
+    def match(self, node: Node, probe: Probe) -> int:
+        return 10 if node.role is Role.SPINBUTTON and probe.tag == "INPUT" else 0
+
+    async def options(self, ctx: DriverContext, field: Field) -> tuple[str, ...]:
+        return ()
+
+    async def read(self, ctx: DriverContext, field: Field) -> str:
+        return await self._text.read(ctx, field)
+
+    async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
+        return await self._text.write(ctx, field, value)
 
 
 class SelectDriver:
@@ -286,17 +503,31 @@ def marked_member(labels: Sequence[str], class_names: Sequence[str]) -> str | No
     return extra[0] if len(extra) == 1 else None
 
 
+def _member(node: Node) -> Member:
+    return Member(node.name, node.handle, bool({State.CHECKED, State.PRESSED} & node.states))
+
+
 async def _fresh_members(ctx: DriverContext, field: Field) -> tuple[Member, ...]:
-    """The group's members as they are now: choosing one can re-render the rest."""
-    labels = {m.label for m in field.members}
+    """The group's own members as they are now.
+
+    The same elements when they still exist. Otherwise choosing one re-rendered the rest,
+    and they are found again by label, but only within this field's question: another
+    question may offer the very same option text.
+    """
     role = Role.RADIO if field.kind is FieldKind.RADIO else Role.BUTTON
-    found = tuple(
-        Member(n.name, n.handle, bool({State.CHECKED, State.PRESSED} & n.states))
-        for n in await ctx.nodes()
-        if n.role is role and n.name in labels and n.locator.scope == field.locator.scope
-        and n.handle is not None
-    )
-    return found or field.members
+    nodes = [n for n in await ctx.nodes() if n.role is role and n.handle is not None]
+    by_handle = {n.handle: n for n in nodes}
+    own = [by_handle.get(m.handle) for m in field.members]
+    if all(node is not None for node in own):
+        return tuple(_member(node) for node in own if node is not None)
+    labels = {m.label for m in field.members}
+    found = [n for n in nodes if n.name in labels and n.locator.scope == field.locator.scope]
+    if field.group:
+        found = [
+            n for n in found
+            if (await ctx.support.probe(ctx.surface, n)).question == field.group
+        ]
+    return tuple(_member(n) for n in found) or field.members
 
 
 def _choose(field: Field, value: str) -> tuple[Member | None, tuple[str, ...]]:
@@ -542,8 +773,21 @@ class FileDriver:
     async def options(self, ctx: DriverContext, field: Field) -> tuple[str, ...]:
         return ()
 
+    async def _on_document(
+        self, ctx: DriverContext, field: Field, function: str, arg: str
+    ) -> Any:
+        document = await _web(ctx).document_of(ctx.surface, field.handle)
+        return await _call(ctx, document, function, [arg])
+
     async def read(self, ctx: DriverContext, field: Field) -> str:
-        return str(await _call(ctx, field.handle, FILE_READ_JS))
+        """The input's files, or the names its group shows once the input was replaced."""
+        try:
+            files = str(await _call(ctx, field.handle, FILE_READ_JS))
+        except LayerError:
+            files = ""
+        if files or not field.group:
+            return files
+        return str(await self._on_document(ctx, field, FILE_SHOWN_JS, field.group))
 
     async def write(self, ctx: DriverContext, field: Field, value: str) -> WriteOutcome:
         path = os.path.expanduser(value)
@@ -552,10 +796,18 @@ class FileDriver:
         await ctx.act(field.handle, Action(ActionKind.UPLOAD, paths=(path,)), budget=3.0)
         base = os.path.basename(path)
         try:
-            got = await self.read(ctx, field)
+            got = str(await _call(ctx, field.handle, FILE_READ_JS))
         except LayerError:
             got = ""  # the widget replaced its input; the page text below decides
-        if base.casefold() in got.casefold():
+        held = base.casefold() in got.casefold()
+        landed = [str(g) for g in await self._on_document(ctx, field, FILE_LANDED_JS, base)]
+        where = ", ".join(f'"{group}"' for group in landed)
+        if field.group and landed and field.group not in landed:
+            return WriteOutcome(WriteStatus.MISMATCH, got, note=f"landed in {where}")
+        if landed:
+            evidence = Evidence.DRIVER if held else Evidence.TREE
+            return WriteOutcome(WriteStatus.OK, got or base, evidence, note=f"landed in {where}")
+        if held:
             return WriteOutcome(WriteStatus.OK, got, Evidence.DRIVER)
         text = " ".join(f"{n.name} {n.value or ''}" for n in await ctx.nodes())
         if base.casefold() in text.casefold():
@@ -564,8 +816,8 @@ class FileDriver:
 
 
 DRIVERS: tuple[WidgetDriver, ...] = (
-    TextDriver(), SelectDriver(), ToggleDriver(), RadioDriver(), ButtonGroupDriver(),
-    ComboboxDriver(), ListboxPopupDriver(), FileDriver(),
+    TextDriver(), NumberDriver(), SelectDriver(), ToggleDriver(), RadioDriver(),
+    ButtonGroupDriver(), ComboboxDriver(), ListboxPopupDriver(), FileDriver(),
 )
 
 
@@ -585,6 +837,7 @@ class WebForms:
             tag=str(facts["tag"]), input_type=str(facts["type"]), popup=str(facts["popup"]),
             autocomplete=str(facts["autocomplete"]), name_attr=str(facts["name"]),
             pressable_state=bool(facts["pressable"]), label=str(facts["label"]),
+            group=str(facts["group"]), question=str(facts["question"]),
         )
 
     async def extra_fields(self, ctx: DriverContext) -> list[Field]:
@@ -592,9 +845,12 @@ class WebForms:
         fields: list[Field] = []
         for handle in await self._backend.file_inputs(ctx.surface):
             info = await self._backend.call_on(ctx.surface, handle, FILE_LABEL_JS)
-            label = str(info["label"])
+            group = str(info["group"])
+            # The group's label is the identity: every input in a form may be named "Attach".
+            label = group or str(info["label"])
             fields.append(Field(
                 label=label, kind=FieldKind.FILE, driver=driver, handle=handle,
                 locator=Locator(Role.OTHER, f"file:{label}"), required=bool(info["required"]),
+                group=group,
             ))
         return fields

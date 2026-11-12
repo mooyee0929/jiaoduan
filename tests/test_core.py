@@ -294,6 +294,11 @@ def test_a_search_form_is_never_a_commit() -> None:
     assert commit_reason(commit_node("Submit"), CommitFacts(search_form=True)) is None
 
 
+def test_a_commit_label_on_the_submit_button_of_a_non_search_form_is_gated() -> None:
+    facts = CommitFacts(submit_button=True, search_form=False)
+    assert commit_reason(commit_node("Submit application"), facts) == "its label names a commit"
+
+
 def test_textboxes_are_not_commit_candidates() -> None:
     assert commit_reason(commit_node("Submit", Role.TEXTBOX), CommitFacts()) is None
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from jiaoduan.forms.schema import (
     WriteStatus,
     collect,
     match_option,
+    same_text,
     same_value,
 )
 from jiaoduan.model import Evidence, Locator
@@ -25,8 +27,9 @@ _MAX_SHOWN_OPTIONS = 8
 LINGER_SECONDS = 0.8
 # Uploads often clear text fields, so they go first; choices can reveal more fields, so last.
 _ORDER = {
-    FieldKind.FILE: 0, FieldKind.TEXT: 1, FieldKind.SELECT: 2, FieldKind.COMBOBOX: 3,
-    FieldKind.LISTBOX: 3, FieldKind.RADIO: 4, FieldKind.BUTTONS: 4, FieldKind.TOGGLE: 4,
+    FieldKind.FILE: 0, FieldKind.TEXT: 1, FieldKind.NUMBER: 1, FieldKind.SELECT: 2,
+    FieldKind.COMBOBOX: 3, FieldKind.LISTBOX: 3, FieldKind.RADIO: 4, FieldKind.BUTTONS: 4,
+    FieldKind.TOGGLE: 4,
 }
 
 
@@ -65,15 +68,15 @@ def toggle_word(value: str) -> str:
     raise LayerError(INVALID_ARGS, f"{value!r} is not on or off")
 
 
-def confirmed(got: str, wanted: str, kind: FieldKind) -> bool:
+def confirmed(got: str, wanted: str, kind: FieldKind, input_type: str = "") -> bool:
     """Does what a field holds now still match what was written into it?"""
     if kind is FieldKind.TOGGLE:
         return got == toggle_word(wanted)
     if kind is FieldKind.FILE:
         return wanted.rsplit("/", 1)[-1].casefold() in got.casefold()
-    if kind is FieldKind.TEXT:
+    if kind in {FieldKind.TEXT, FieldKind.NUMBER}:
         # Containment would accept "AdaAda" for "Ada": exactly the doubled-autofill failure.
-        return same_value(got, wanted)
+        return same_text(got, wanted, input_type)
     # A picked option is often shown with extra words around it, e.g. "Master of Science (MS)".
     return same_value(got, wanted) or bool(wanted) and wanted.casefold() in got.casefold()
 
@@ -145,29 +148,54 @@ async def fill(
     kinds = {f.id: f.kind for f in initial}
     plan.sort(key=lambda pair: _ORDER[kinds[pair[0]]])
 
+    written: dict[str, Field] = {}
     for field_id, value in plan:
-        results[field_id] = await _write_one(ctx, root, field_id, value)
+        results[field_id], item = await _write_one(ctx, root, field_id, value)
+        if item is not None:
+            written[field_id] = item
     if plan and linger > 0:
         await asyncio.sleep(linger)
-    return await _final_pass(ctx, root, plan, results, initial_ids)
+    return await _final_pass(ctx, root, plan, results, initial_ids, written)
 
 
 async def _write_one(
     ctx: DriverContext, root: str | None, field_id: str, value: str
-) -> WriteOutcome:
-    # Fields are re-read before each write: the previous one may have re-rendered the form.
+) -> tuple[WriteOutcome, Field | None]:
+    # Fields are re-read before each write: the previous one may have re-rendered the form,
+    # and an upload often replaces the inputs after it, so each is found again by identity.
     fresh = await collect(ctx, root, with_values=False)
     item = next((f for f in fresh if f.id == field_id), None)
     if item is None:
-        return WriteOutcome(WriteStatus.ERROR, note="the field disappeared before it was written")
+        gone = "the field disappeared before it was written"
+        return WriteOutcome(WriteStatus.ERROR, note=gone), None
     if item.disabled:
-        return WriteOutcome(WriteStatus.ERROR, note="the field is disabled")
+        return WriteOutcome(WriteStatus.ERROR, note="the field is disabled"), item
     try:
-        return await item.driver.write(ctx, item, value)
+        return await item.driver.write(ctx, item, value), item
     except LayerError as exc:
         if exc.code == STALE_REF:
-            return WriteOutcome(WriteStatus.ERROR, note=f"re-rendered while writing: {exc.message}")
-        return WriteOutcome(WriteStatus.ERROR, note=exc.message)
+            note = f"re-rendered while writing: {exc.message}"
+            return WriteOutcome(WriteStatus.ERROR, note=note), item
+        return WriteOutcome(WriteStatus.ERROR, note=exc.message), item
+
+
+async def _vanished_value(ctx: DriverContext, item: Field | None, value: str) -> str | None:
+    """What a field whose element is gone still shows, when its kind can tell.
+
+    An upload commonly swaps its input for the file name and a Remove button. When the field
+    sits in a labelled group, that group says whether the file is there. Without one (Ashby,
+    Lever), the file name appearing anywhere on the page is the only evidence left.
+    """
+    if item is None or item.kind is not FieldKind.FILE:
+        return None
+    if item.group:
+        try:
+            return await item.driver.read(ctx, item)
+        except LayerError:
+            return None
+    base = os.path.basename(os.path.expanduser(value))
+    text = " ".join(f"{n.name} {n.value or ''}" for n in await ctx.nodes())
+    return base if base.casefold() in text.casefold() else None
 
 
 async def _final_pass(
@@ -176,6 +204,7 @@ async def _final_pass(
     plan: Sequence[tuple[str, str]],
     results: dict[str, WriteOutcome],
     initial_ids: set[str],
+    written: Mapping[str, Field],
 ) -> tuple[list[FillLine], list[Field], list[Field]]:
     final = await collect(ctx, root)
     by_id = {f.id: f for f in final}
@@ -187,21 +216,25 @@ async def _final_pass(
             continue  # nothing could be read back when it was written; reported as such
         current = by_id.get(field_id)
         if current is None:
+            shown = await _vanished_value(ctx, written.get(field_id), value)
+            if shown is not None and confirmed(shown, value, FieldKind.FILE):
+                continue
             results[field_id] = WriteOutcome(
                 WriteStatus.MISMATCH, note="the field is gone after the form finished updating"
             )
-        elif not confirmed(current.value, value, current.kind):
+        elif not confirmed(current.value, value, current.kind, current.input_type):
             results[field_id] = WriteOutcome(
                 WriteStatus.MISMATCH, got=current.value, evidence=Evidence.NONE,
                 note="changed after it was written",
             )
+    known = {**written, **by_id}
     lines = [
         FillLine(
             key,
-            by_id[key].label if key in by_id else key,
-            by_id[key].kind.value if key in by_id else "?",
+            known[key].label if key in known else key,
+            known[key].kind.value if key in known else "?",
             outcome,
-            by_id[key].locator if key in by_id else None,
+            known[key].locator if key in known else None,
         )
         for key, outcome in results.items()
     ]

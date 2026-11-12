@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from jiaoduan import prune
+from jiaoduan.errors import STALE_REF, LayerError
 from jiaoduan.model import (
     Action,
     Delivery,
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
     from jiaoduan.model import Backend
 
 _MAX_GROUP = 6
+_MAX_CHOICES = 40
 _MAX_GROUP_LABEL = 24
 _YES_NO = frozenset({"yes", "no"})
 _GROUP_ROLES = frozenset({Role.GROUP, Role.RADIOGROUP, Role.TOOLBAR})
@@ -34,6 +36,7 @@ _DEFAULT_SETTLE = 1.5
 
 class FieldKind(StrEnum):
     TEXT = "text"
+    NUMBER = "number"
     SELECT = "select"
     COMBOBOX = "combobox"
     LISTBOX = "listbox"
@@ -55,6 +58,9 @@ class Probe:
     pressable_state: bool = False
     # A label from elements outside the control; a popup button's own name is usually its value.
     label: str = ""
+    # For a radio or choice button: which question it answers, and that question's text.
+    group: str = ""
+    question: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,9 @@ class Field:
     required: bool = False
     disabled: bool = False
     section: str = ""
+    input_type: str = ""
+    # The label of the group the field's own elements sit in, such as an upload's slot.
+    group: str = ""
     members: tuple[Member, ...] = ()
     id: str = ""
     value: str = ""
@@ -153,8 +162,19 @@ class DriverContext:
         await backend.settle(self.surface, mark, budget)
 
 
+_TYPOGRAPHIC = str.maketrans({
+    "‘": "'", "’": "'", "‚": "'", "′": "'",
+    "“": '"', "”": '"', "„": '"', "″": '"',
+    "–": "-", "—": "-", "−": "-",
+})
+
+
 def normal(text: str | None) -> str:
-    return " ".join((text or "").split())
+    """Collapsed whitespace, with typographic quotes and dashes as their plain forms.
+
+    Pages write "master’s" and "Jan – Mar" where an agent types "master's" and "Jan - Mar".
+    """
+    return " ".join((text or "").translate(_TYPOGRAPHIC).split())
 
 
 def _alnum(text: str) -> str:
@@ -167,6 +187,37 @@ def same_value(got: str, wanted: str) -> bool:
     if left == right:
         return True
     return bool(_alnum(left)) and _alnum(left) == _alnum(right)
+
+
+_MIN_PHONE_DIGITS = 7
+_MAX_COUNTRY_CODE_DIGITS = 3
+
+
+def same_phone(got: str, wanted: str) -> bool:
+    """The same number once a page's formatting, or a country code it adds, is ignored.
+
+    "+1 (626) 423-4933" is "6264234933" reformatted; "62642349336264234933" is a doubled
+    autofill and is not.
+    """
+    if any(c.isalpha() for c in got + wanted):
+        return False
+    have = "".join(c for c in got if c.isdigit())
+    want = "".join(c for c in wanted if c.isdigit())
+    if min(len(have), len(want)) < _MIN_PHONE_DIGITS:
+        return False
+    if have == want:
+        return True
+    (short, _), (long, long_text) = sorted(((have, got), (want, wanted)), key=lambda p: len(p[0]))
+    extra = len(long) - len(short)
+    return (
+        extra <= _MAX_COUNTRY_CODE_DIGITS and long.endswith(short)
+        and long_text.lstrip().startswith("+")
+    )
+
+
+def same_text(got: str, wanted: str, input_type: str = "") -> bool:
+    """``same_value``, also accepting a phone field's own reformatting of the same digits."""
+    return same_value(got, wanted) or input_type == "tel" and same_phone(got, wanted)
 
 
 def match_option(
@@ -231,6 +282,7 @@ class _Collector:
     consumed: set[int] = field(default_factory=set)
     fields: list[Field] = field(default_factory=list)
     heading: str = ""
+    probes: dict[int, Probe] = field(default_factory=dict)
 
     async def run(self) -> list[Field]:
         for index, node in enumerate(self.nodes):
@@ -241,18 +293,25 @@ class _Collector:
             await self._visit(index, node)
         return self.fields
 
+    async def _probe(self, index: int) -> Probe:
+        if index not in self.probes:
+            self.probes[index] = await self.ctx.support.probe(self.ctx.surface, self.nodes[index])
+        return self.probes[index]
+
     async def _visit(self, index: int, node: Node) -> None:
         if node.role is Role.RADIO:
-            self._group(index, node, FieldKind.RADIO, Role.RADIO)
+            await self._group(index, node, FieldKind.RADIO, await self._run(index, Role.RADIO))
             return
         if node.role is Role.BUTTON:
-            if await self._is_button_group(index, node):
-                self._group(index, node, FieldKind.BUTTONS, Role.BUTTON)
+            members = await self._button_group(index)
+            if members:
+                await self._group(index, node, FieldKind.BUTTONS, members)
                 return
             if State.HASPOPUP not in node.states:
                 return
         elif node.role not in {
-            Role.TEXTBOX, Role.SEARCHBOX, Role.COMBOBOX, Role.CHECKBOX, Role.SWITCH,
+            Role.TEXTBOX, Role.SEARCHBOX, Role.SPINBUTTON, Role.COMBOBOX, Role.CHECKBOX,
+            Role.SWITCH,
         }:
             return
         probe = await self.ctx.support.probe(self.ctx.surface, node)
@@ -276,14 +335,15 @@ class _Collector:
             required=State.REQUIRED in node.states,
             disabled=State.DISABLED in node.states,
             section=self.heading,
+            input_type=probe.input_type.lower(),
         ))
 
-    def _siblings(self, index: int, role: Role) -> list[int]:
+    def _siblings(self, index: int, role: Role, limit: int) -> list[int]:
         parent = self.parents[index]
         depth = self.nodes[index].depth
         found = [index]
         cursor = index + 1
-        while cursor < len(self.nodes) and len(found) < _MAX_GROUP:
+        while cursor < len(self.nodes) and len(found) < limit:
             node = self.nodes[cursor]
             if node.depth < depth:
                 break
@@ -295,28 +355,48 @@ class _Collector:
             cursor += 1
         return found
 
-    async def _is_button_group(self, index: int, node: Node) -> bool:
-        members = self._siblings(index, Role.BUTTON)
+    async def _run(self, index: int, role: Role) -> list[int]:
+        """The options of one question: siblings in the tree that answer the same question.
+
+        Neighbouring questions in unnamed wrappers look like one run of siblings in the tree,
+        with only their question text between them; the page says where each one ends.
+        """
+        first = await self._probe(index)
+        limit = _MAX_CHOICES if first.group and role is Role.RADIO else _MAX_GROUP
+        siblings = self._siblings(index, role, limit)
+        if not first.group:
+            return siblings
+        run = [index]
+        for cursor in siblings[1:]:
+            if (await self._probe(cursor)).group != first.group:
+                break
+            run.append(cursor)
+        return run
+
+    async def _button_group(self, index: int) -> list[int]:
+        members = await self._run(index, Role.BUTTON)
         if len(members) < 2:
-            return False
+            return []
         names = [self.nodes[i].name.strip().casefold() for i in members]
         if any(len(name) > _MAX_GROUP_LABEL for name in names):
-            return False
-        if set(names) <= _YES_NO:
-            return True
-        probe = await self.ctx.support.probe(self.ctx.surface, node)
-        return probe.pressable_state
+            return []
+        if set(names) <= _YES_NO or (await self._probe(index)).pressable_state:
+            return members
+        return []
 
-    def _group(self, index: int, node: Node, kind: FieldKind, role: Role) -> None:
-        indices = self._siblings(index, role)
+    async def _group(self, index: int, node: Node, kind: FieldKind, indices: list[int]) -> None:
         driver = _driver_of_kind(self.ctx.support, kind)
         if driver is None or node.handle is None:
             return
         self.consumed.update(indices)
         parent = self.parents[index]
+        question = (await self._probe(index)).question
         # Only a group names its members; a form or region around them is too far away.
         grouped = parent is not None and parent.role in _GROUP_ROLES and parent.name
-        label = (parent.name if grouped and parent else "") or _preceding_text(self.nodes, index)
+        label = (
+            question or (parent.name if grouped and parent else "")
+            or _preceding_text(self.nodes, index)
+        )
         members = tuple(
             Member(
                 self.nodes[i].name, self.nodes[i].handle,
@@ -332,6 +412,7 @@ class _Collector:
             locator=Locator(Role.GROUP, label, node.locator.scope),
             required=any(State.REQUIRED in self.nodes[i].states for i in indices),
             section=self.heading,
+            group=question,
             members=members,
         ))
 
@@ -339,7 +420,22 @@ class _Collector:
 async def collect(
     ctx: DriverContext, root: str | None, *, with_values: bool = True
 ) -> list[Field]:
-    """Every field on the surface, or under ``root``, in document order."""
+    """Every field on the surface, or under ``root``, in document order.
+
+    An upload or a conditional question can re-render the form while it is being read; the
+    read then starts over once from a fresh tree instead of failing the whole fill.
+    """
+    try:
+        return await _collect_once(ctx, root, with_values=with_values)
+    except LayerError as exc:
+        if exc.code != STALE_REF:
+            raise
+        return await _collect_once(ctx, root, with_values=with_values)
+
+
+async def _collect_once(
+    ctx: DriverContext, root: str | None, *, with_values: bool
+) -> list[Field]:
     nodes = await ctx.nodes()
     scoped: Sequence[Node] = nodes
     if root is not None:

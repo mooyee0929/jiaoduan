@@ -83,6 +83,17 @@ OBSERVER_JS = f"""(() => {{
   }}).observe(document, {{subtree: true, childList: true, attributes: true, characterData: true}});
 }})();"""
 
+# method=get alone does not make a search: Greenhouse's application form is a GET form whose
+# script posts the answers itself. A GET form that asks for personal data is treated as a commit.
+SEARCH_FORM_JS = r"""(form) => {
+  if (form.getAttribute('role') === 'search') return true;
+  if ((form.getAttribute('method') || '').toLowerCase() !== 'get') return false;
+  const personal = /\b(name|email|tel|street-address|postal-code|bday|username|cc-number)\b/i;
+  return ![...form.elements].some((field) => field.tagName === 'TEXTAREA'
+    || ['file', 'password', 'email', 'tel'].includes((field.type || '').toLowerCase())
+    || personal.test(field.getAttribute('autocomplete') || ''));
+}"""
+
 GUARD_JS = f"""(() => {{
   if (window.__jiaoduanGuard) return;
   const guard = {{armedUntil: 0}};
@@ -90,24 +101,22 @@ GUARD_JS = f"""(() => {{
   window.addEventListener('submit', (event) => {{
     if (Date.now() < guard.armedUntil) return;
     const form = event.target;
-    if (form.getAttribute && (form.getAttribute('role') === 'search'
-        || (form.getAttribute('method') || '').toLowerCase() === 'get')) return;
+    if (form.getAttribute && ({SEARCH_FORM_JS})(form)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (typeof {BINDING} === 'function') {BINDING}('submit-blocked');
   }}, true);
 }})();"""
 
-COMMIT_FACTS_JS = """function () {
+COMMIT_FACTS_JS = f"""function () {{
   const el = this.nodeType === 1 ? this : this.parentElement;
-  if (!el) return {submit: false, search: false};
+  if (!el) return {{submit: false, search: false}};
   const button = el.closest('button, input[type=submit], input[type=image]');
   const form = (button && button.form) || el.closest('form');
   const submit = !!(button && form && (button.type === 'submit' || button.type === 'image'));
-  const search = !!form && (form.getAttribute('role') === 'search'
-    || (form.getAttribute('method') || '').toLowerCase() === 'get');
-  return {submit, search};
-}"""
+  const search = !!form && ({SEARCH_FORM_JS})(form);
+  return {{submit, search}};
+}}"""
 
 KEY_CONTEXT_JS = """function () {
   let el = document.activeElement;
@@ -157,6 +166,12 @@ HIT_JS = """function (x, y) {
   const ok = within(hit, this) || (!page && within(this, hit)) || hit.control === this
     || (this.labels ? [...this.labels].includes(hit) : false);
   return {ok, name: hit.nodeName};
+}"""
+
+CENTER_JS = """function () {
+  const el = this.nodeType === 1 ? this : this.parentElement;
+  if (el) el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'});
+  return !!el;
 }"""
 
 LABEL_OF_JS = """function () { return (this.labels && this.labels[0]) || null; }"""
@@ -233,6 +248,9 @@ class WebOptions:
     headless: bool = True
     mock_keychain: bool = False
     extra_args: tuple[str, ...] = ()
+    # The in-page submit guard also stops a person's own clicks (signing in, creating an
+    # account). Under the ``allow`` commit policy nothing is gated, so the guard stays out.
+    page_guard: bool = True
 
 
 def default_options() -> WebOptions:
@@ -495,6 +513,8 @@ class WebBackend:
         raise LayerError(BACKEND_UNAVAILABLE, "the new window did not attach")
 
     async def _install_guard(self, page: Page) -> None:
+        if not self._options.page_guard:
+            return
         added = await page.session.send(
             "Page.addScriptToEvaluateOnNewDocument",
             {"source": GUARD_JS, "worldName": WORLD, "runImmediately": True},
@@ -769,23 +789,30 @@ class WebBackend:
             await asyncio.sleep(_STABLE_WAIT)
         raise LayerError(NOT_ACTIONABLE, "the element kept moving", hint="retry after it settles")
 
-    async def _check_hit(
+    async def _covering(
         self, session: Session, backend_id: int, x: float, y: float
-    ) -> None:
+    ) -> str | None:
+        """The name of whatever sits on top of the element at (x, y), or None when nothing does."""
         result = await self._call_on(session, backend_id, HIT_JS, [{"value": x}, {"value": y}])
         verdict = result["result"].get("value") or {}
-        if not verdict.get("ok"):
-            raise LayerError(
-                NOT_ACTIONABLE,
-                f"something else is on top of the element: {verdict.get('name', 'unknown')}",
-                hint="close the overlay or scroll, then retry",
-            )
+        return None if verdict.get("ok") else str(verdict.get("name", "unknown"))
 
     async def _aim(self, page: Page, web: WebHandle) -> tuple[float, float]:
         session = page.session_for(web.session_id)
         backend = await self._pointer_target(session, web)
         x, y = await self._stable_point(session, backend)
-        await self._check_hit(session, backend, x, y)
+        cover = await self._covering(session, backend, x, y)
+        if cover is not None:
+            # Sticky headers and footers cover elements near the viewport edge.
+            await self._call_on(session, backend, CENTER_JS)
+            x, y = await self._stable_point(session, backend)
+            cover = await self._covering(session, backend, x, y)
+        if cover is not None:
+            raise LayerError(
+                NOT_ACTIONABLE,
+                f"something else is on top of the element: {cover}",
+                hint="close the overlay or scroll, then retry",
+            )
         offset_x, offset_y = await self._frame_offset(page, session)
         return x + offset_x, y + offset_y
 
@@ -913,7 +940,15 @@ class WebBackend:
         web = _web(handle)
         session = page.session_for(web.session_id)
         encoded = [{"value": a} for a in (args or [])]
-        result = await self._call_on(session, web.backend_id, function, encoded)
+        try:
+            result = await self._call_on(session, web.backend_id, function, encoded)
+        except CdpError as exc:
+            if any(word in exc.detail.lower() for word in _GONE_MESSAGES):
+                raise LayerError(
+                    STALE_REF, f"the element no longer exists: {exc.detail}",
+                    hint="call observe and use a ref from it",
+                ) from exc
+            raise
         if "exceptionDetails" in result:
             raise LayerError(
                 NOT_ACTIONABLE,
@@ -938,6 +973,13 @@ class WebBackend:
         web = _web(handle)
         session = page.session_for(web.session_id)
         await session.send("Input.insertText", {"text": text}, timeout=_INPUT_TIMEOUT)
+
+    async def document_of(self, surface: SurfaceId, handle: Handle) -> WebHandle:
+        """The document an element belongs to, which outlives the element itself."""
+        web = _web(handle)
+        session = self._page(surface).session_for(web.session_id)
+        document = await session.send("DOM.getDocument", {"depth": 0})
+        return WebHandle(web.session_id, int(document["root"]["backendNodeId"]))
 
     async def file_inputs(self, surface: SurfaceId) -> list[WebHandle]:
         """Every file input, hidden ones included: they rarely appear in the accessibility tree."""

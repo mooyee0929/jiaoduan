@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  A Greenhouse-style education question whose options use typographic apostrophes
+  ("Other master’s degree"). The page filters literally, so typing the plain apostrophe
+  finds nothing; only a shorter query lists the option, and it must still be recognised.
+-->
+<html>
+<head><meta charset="utf-8"><title>Curly options</title></head>
+<body>
+<form>
+  <span id="level-label">Highest level of education</span>
+  <input id="level-input" role="combobox" aria-labelledby="level-label" aria-expanded="false"
+         aria-controls="level-list" aria-autocomplete="list" autocomplete="off" required>
+  <ul id="level-list" role="listbox" hidden></ul>
+  <div id="level-value"></div>
+</form>
+<script>
+  const levels = ['Undergraduate', 'Basic science master’s', 'MBA',
+    'Other master’s degree', 'PhD', 'Other graduate degree'];
+  const input = document.getElementById('level-input');
+  const list = document.getElementById('level-list');
+  const value = document.getElementById('level-value');
+  function render() {
+    const query = input.value.toLowerCase();
+    const hits = levels.filter((l) => l.toLowerCase().includes(query));
+    list.innerHTML = hits.map((l) => `<li role="option">${l}</li>`).join('')
+      || '<li class="empty">No options</li>';
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+  input.addEventListener('input', render);
+  input.addEventListener('click', render);
+  list.addEventListener('mousedown', (event) => {
+    const option = event.target.closest('[role=option]');
+    if (!option) return;
+    event.preventDefault();
+    value.textContent = option.textContent;
+    input.value = option.textContent;
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+  });
+</script>
+</body>
+</html>

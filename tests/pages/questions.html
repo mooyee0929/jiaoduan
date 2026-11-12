@@ -1,0 +1,87 @@
+<!doctype html>
+<!--
+  Choice questions laid out the way Ashby renders them: every question sits in an unnamed
+  div, so in the accessibility tree the options of neighbouring questions are siblings
+  with only the question text between them.
+  - two Yes/No button questions whose state shows only in a class name;
+  - three native radio questions, one name per question;
+  - two acknowledgements, each a single custom radio with the same text.
+-->
+<meta charset="utf-8">
+<title>Questions</title>
+<style>
+  .option.active { background: #135; color: #fff; }
+  [role=radio] { cursor: pointer; display: inline-block; padding: 2px 6px; }
+  [role=radio][aria-checked=true] { outline: 2px solid #135; }
+</style>
+<form aria-label="Application">
+  <div class="entry">
+    <label class="heading" for="auth">Are you legally authorized to work in the United States?<span>*</span></label>
+    <div class="yesno" data-key="auth">
+      <button type="button" class="option">Yes</button>
+      <button type="button" class="option">No</button>
+      <input type="checkbox" id="auth" name="auth" tabindex="-1" style="display:none">
+    </div>
+  </div>
+  <div class="entry">
+    <label class="heading" for="sponsor">Will you now or in the future require sponsorship?<span>*</span></label>
+    <div class="yesno" data-key="sponsor">
+      <button type="button" class="option">Yes</button>
+      <button type="button" class="option">No</button>
+      <input type="checkbox" id="sponsor" name="sponsor" tabindex="-1" style="display:none">
+    </div>
+  </div>
+
+  <div class="entry">
+    <div class="heading">Have you worked here before?</div>
+    <div><input type="radio" id="before-yes" name="before" value="Yes"><label for="before-yes">Yes</label></div>
+    <div><input type="radio" id="before-no" name="before" value="No"><label for="before-no">No</label></div>
+  </div>
+  <div class="entry">
+    <div class="heading">Are you at least 18 years old?</div>
+    <div><input type="radio" id="adult-yes" name="adult" value="Yes"><label for="adult-yes">Yes</label></div>
+    <div><input type="radio" id="adult-no" name="adult" value="No"><label for="adult-no">No</label></div>
+  </div>
+  <div class="entry">
+    <div class="heading">Can you work on site three days a week?</div>
+    <div><input type="radio" id="onsite-yes" name="onsite" value="Yes"><label for="onsite-yes">Yes</label></div>
+    <div><input type="radio" id="onsite-no" name="onsite" value="No"><label for="onsite-no">No</label></div>
+  </div>
+
+  <div class="entry">
+    <div class="heading">Arbitration Acknowledgment<span>*</span></div>
+    <p>Disputes are settled by binding arbitration.</p>
+    <div class="choices" data-key="arbitration">
+      <div role="radio" aria-checked="false" tabindex="0">I Acknowledge/Accept this Statement</div>
+    </div>
+  </div>
+  <div class="entry">
+    <div class="heading">GDPR Acknowledgement<span>*</span></div>
+    <p>Your data is processed under the GDPR.</p>
+    <div class="choices" data-key="gdpr">
+      <div role="radio" aria-checked="false" tabindex="0">I Acknowledge/Accept this Statement</div>
+    </div>
+  </div>
+</form>
+<script>
+  const answers = (window.__answers = {});
+  for (const group of document.querySelectorAll('.yesno')) {
+    for (const button of group.querySelectorAll('button')) {
+      button.addEventListener('click', () => {
+        const wasOn = button.classList.contains('active');
+        for (const other of group.querySelectorAll('button')) other.classList.remove('active');
+        if (!wasOn) button.classList.add('active');
+        answers[group.dataset.key] = wasOn ? '' : button.textContent;
+      });
+    }
+  }
+  for (const radio of document.querySelectorAll('input[type=radio]')) {
+    radio.addEventListener('change', () => { answers[radio.name] = radio.value; });
+  }
+  for (const radio of document.querySelectorAll('[role=radio]')) {
+    radio.addEventListener('click', () => {
+      radio.setAttribute('aria-checked', 'true');
+      answers[radio.closest('.choices').dataset.key] = true;
+    });
+  }
+</script>
