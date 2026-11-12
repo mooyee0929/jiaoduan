@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from jiaoduan.model import Backend
 
 _MAX_GROUP = 6
+_MAX_CHOICES = 40
 _MAX_GROUP_LABEL = 24
 _YES_NO = frozenset({"yes", "no"})
 _GROUP_ROLES = frozenset({Role.GROUP, Role.RADIOGROUP, Role.TOOLBAR})
@@ -55,6 +56,9 @@ class Probe:
     pressable_state: bool = False
     # A label from elements outside the control; a popup button's own name is usually its value.
     label: str = ""
+    # For a radio or choice button: which question it answers, and that question's text.
+    group: str = ""
+    question: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,6 +237,7 @@ class _Collector:
     consumed: set[int] = field(default_factory=set)
     fields: list[Field] = field(default_factory=list)
     heading: str = ""
+    probes: dict[int, Probe] = field(default_factory=dict)
 
     async def run(self) -> list[Field]:
         for index, node in enumerate(self.nodes):
@@ -243,13 +248,19 @@ class _Collector:
             await self._visit(index, node)
         return self.fields
 
+    async def _probe(self, index: int) -> Probe:
+        if index not in self.probes:
+            self.probes[index] = await self.ctx.support.probe(self.ctx.surface, self.nodes[index])
+        return self.probes[index]
+
     async def _visit(self, index: int, node: Node) -> None:
         if node.role is Role.RADIO:
-            self._group(index, node, FieldKind.RADIO, Role.RADIO)
+            await self._group(index, node, FieldKind.RADIO, await self._run(index, Role.RADIO))
             return
         if node.role is Role.BUTTON:
-            if await self._is_button_group(index, node):
-                self._group(index, node, FieldKind.BUTTONS, Role.BUTTON)
+            members = await self._button_group(index)
+            if members:
+                await self._group(index, node, FieldKind.BUTTONS, members)
                 return
             if State.HASPOPUP not in node.states:
                 return
@@ -280,12 +291,12 @@ class _Collector:
             section=self.heading,
         ))
 
-    def _siblings(self, index: int, role: Role) -> list[int]:
+    def _siblings(self, index: int, role: Role, limit: int) -> list[int]:
         parent = self.parents[index]
         depth = self.nodes[index].depth
         found = [index]
         cursor = index + 1
-        while cursor < len(self.nodes) and len(found) < _MAX_GROUP:
+        while cursor < len(self.nodes) and len(found) < limit:
             node = self.nodes[cursor]
             if node.depth < depth:
                 break
@@ -297,28 +308,48 @@ class _Collector:
             cursor += 1
         return found
 
-    async def _is_button_group(self, index: int, node: Node) -> bool:
-        members = self._siblings(index, Role.BUTTON)
+    async def _run(self, index: int, role: Role) -> list[int]:
+        """The options of one question: siblings in the tree that answer the same question.
+
+        Neighbouring questions in unnamed wrappers look like one run of siblings in the tree,
+        with only their question text between them; the page says where each one ends.
+        """
+        first = await self._probe(index)
+        limit = _MAX_CHOICES if first.group and role is Role.RADIO else _MAX_GROUP
+        siblings = self._siblings(index, role, limit)
+        if not first.group:
+            return siblings
+        run = [index]
+        for cursor in siblings[1:]:
+            if (await self._probe(cursor)).group != first.group:
+                break
+            run.append(cursor)
+        return run
+
+    async def _button_group(self, index: int) -> list[int]:
+        members = await self._run(index, Role.BUTTON)
         if len(members) < 2:
-            return False
+            return []
         names = [self.nodes[i].name.strip().casefold() for i in members]
         if any(len(name) > _MAX_GROUP_LABEL for name in names):
-            return False
-        if set(names) <= _YES_NO:
-            return True
-        probe = await self.ctx.support.probe(self.ctx.surface, node)
-        return probe.pressable_state
+            return []
+        if set(names) <= _YES_NO or (await self._probe(index)).pressable_state:
+            return members
+        return []
 
-    def _group(self, index: int, node: Node, kind: FieldKind, role: Role) -> None:
-        indices = self._siblings(index, role)
+    async def _group(self, index: int, node: Node, kind: FieldKind, indices: list[int]) -> None:
         driver = _driver_of_kind(self.ctx.support, kind)
         if driver is None or node.handle is None:
             return
         self.consumed.update(indices)
         parent = self.parents[index]
+        question = (await self._probe(index)).question
         # Only a group names its members; a form or region around them is too far away.
         grouped = parent is not None and parent.role in _GROUP_ROLES and parent.name
-        label = (parent.name if grouped and parent else "") or _preceding_text(self.nodes, index)
+        label = (
+            question or (parent.name if grouped and parent else "")
+            or _preceding_text(self.nodes, index)
+        )
         members = tuple(
             Member(
                 self.nodes[i].name, self.nodes[i].handle,
@@ -334,6 +365,7 @@ class _Collector:
             locator=Locator(Role.GROUP, label, node.locator.scope),
             required=any(State.REQUIRED in self.nodes[i].states for i in indices),
             section=self.heading,
+            group=question,
             members=members,
         ))
 

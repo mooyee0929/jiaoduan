@@ -67,3 +67,41 @@ def test_file_fields_with_one_name_are_told_apart_by_their_group() -> None:
     assert report.startswith("fill: 3/3 ok"), report
     assert re.search(r'"Undergraduate Transcript" ok .*landed in "Undergraduate Transcript"',
                      report), report
+
+
+def test_each_question_is_its_own_field_and_fill_presses_its_own_option() -> None:
+    async def scenario() -> tuple[str, str, dict[str, Any]]:
+        with pages_server() as host:
+            async with engine_with_chrome() as engine:
+                opened = await engine.open("a", f"http://{host}/questions.html")
+                surface = opened.split()[0]
+                schema = await engine.form("a")
+                lines = schema_lines(schema)
+                ack = "I Acknowledge/Accept this Statement"
+                report = await engine.fill("a", {
+                    "Are you legally authorized to work in the United States?": "Yes",
+                    "Will you now or in the future require sponsorship?": "No",
+                    "Have you worked here before?": "No",
+                    "Are you at least 18 years old?": "Yes",
+                    "Can you work on site three days a week?": "No",
+                    lines["Arbitration Acknowledgment"].split()[0]: ack,
+                    lines["GDPR Acknowledgement"].split()[0]: ack,
+                })
+                return schema, report, await page_value(engine, surface, "window.__answers")
+
+    schema, report, answers = run(scenario())
+    lines = schema_lines(schema)
+    for label in ("Are you legally authorized to work in the United States?",
+                  "Will you now or in the future require sponsorship?"):
+        assert lines[label].split()[1] == "buttons", schema
+        assert lines[label].endswith("options: Yes | No"), schema
+    for label in ("Have you worked here before?", "Are you at least 18 years old?",
+                  "Can you work on site three days a week?"):
+        assert lines[label].endswith("options: Yes | No"), schema
+    assert lines["GDPR Acknowledgement"].split()[1] == "radio", schema
+    assert answers == {
+        "auth": "Yes", "sponsor": "No", "before": "No", "adult": "Yes", "onsite": "No",
+        "arbitration": True, "gdpr": True,
+    }, report
+    assert report.startswith("fill: 7/7 ok"), report
+    assert "unchanged" not in report, report
